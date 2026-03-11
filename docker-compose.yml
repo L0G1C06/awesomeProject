@@ -173,49 +173,49 @@ services:
   # ─────────────────────────────────────────
   # API — FastAPI
   # ─────────────────────────────────────────
-  api:
-    build:
-      context: .
-      dockerfile: api/Dockerfile
-    container_name: rag_api
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    environment:
-      POSTGRES_HOST: postgres
-      MILVUS_HOST: milvus
-      MINIO_ENDPOINT: minio:9000
-      OLLAMA_HOST: http://ollama:11434
-      MLFLOW_TRACKING_URI: http://mlflow:5000
-      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      milvus:
-        condition: service_healthy
-    volumes:
-      - ./:/app
-    networks:
-      - rag_network
+  # api:
+  #   build:
+  #     context: .
+  #     dockerfile: api/Dockerfile
+  #   container_name: rag_api
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8000:8000"
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     POSTGRES_HOST: postgres
+  #     MILVUS_HOST: milvus
+  #     MINIO_ENDPOINT: minio:9000
+  #     OLLAMA_HOST: http://ollama:11434
+  #     MLFLOW_TRACKING_URI: http://mlflow:5000
+  #     MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+  #     AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+  #     AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     milvus:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./:/app
+  #   networks:
+  #     - rag_network
 
   # ─────────────────────────────────────────
   # FRONTEND — Gradio
   # ─────────────────────────────────────────
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: rag_frontend
-    restart: unless-stopped
-    ports:
-      - "7860:7860"
-    environment:
-      API_URL: http://api:8000
-    depends_on:
-      - api
-    networks:
-      - rag_network
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   container_name: rag_frontend
+  #   restart: unless-stopped
+  #   ports:
+  #     - "7860:7860"
+  #   environment:
+  #     API_URL: http://api:8000
+  #   depends_on:
+  #     - api
+  #   networks:
+  #     - rag_network
