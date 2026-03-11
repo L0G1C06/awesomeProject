@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ─────────────────────────────────────────────────────────────
 --  CAMADA: Controle de datasets ingeridos
 -- ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS datasets (
+CREATE TABLE IF NOT EXISTS rag_datasets (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name        VARCHAR(255) NOT NULL,
     domain      VARCHAR(100) NOT NULL,
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS datasets (
 -- ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS data_files (
     id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    dataset_id    UUID REFERENCES datasets(id) ON DELETE CASCADE,
+    dataset_id    UUID REFERENCES rag_datasets(id) ON DELETE CASCADE,
     layer         VARCHAR(10) NOT NULL CHECK (layer IN ('bronze', 'silver', 'gold')),
     bucket        VARCHAR(100) NOT NULL,
     object_key    TEXT NOT NULL,
@@ -110,6 +110,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_datasets_updated
-    BEFORE UPDATE ON datasets
+CREATE TRIGGER trg_rag_datasets_updated
+    BEFORE UPDATE ON rag_datasets
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

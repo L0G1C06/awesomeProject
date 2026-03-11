@@ -11,7 +11,7 @@ from pymilvus import connections, Collection
 from api.schemas.query import QueryResponse, RetrievedDoc
 from api.services.milvus_service import MilvusService
 from api.services.postgres_service import PostgresService
-from core.config import settings
+from api.schemas.config import settings
 
 
 class RAGService:

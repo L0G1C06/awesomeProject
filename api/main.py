@@ -5,8 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
-from api.routers import health, query, ingest, documents, experiments
-from api.middleware.logging import LoggingMiddleware
+from api.routers import query
 
 app = FastAPI(
     title="RAG Enterprise API",
@@ -24,14 +23,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(LoggingMiddleware)
 
 # ── Routers ────────────────────────────────────────────────────
-app.include_router(health.router,       tags=["Health"])
-app.include_router(query.router,        prefix="/query",       tags=["RAG Query"])
-app.include_router(ingest.router,       prefix="/ingest",      tags=["Ingestão"])
-app.include_router(documents.router,    prefix="/documents",   tags=["Documentos"])
-app.include_router(experiments.router,  prefix="/experiments", tags=["MLflow"])
+app.include_router(query.router, prefix="/query", tags=["RAG Query"])
 
 
 @app.get("/", include_in_schema=False)

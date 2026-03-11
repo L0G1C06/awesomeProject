@@ -1,5 +1,3 @@
-version: "3.9"
-
 networks:
   rag_network:
     driver: bridge
@@ -75,7 +73,7 @@ services:
     networks:
       - rag_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-raguser}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-raguser} -d ${POSTGRES_DB:-ragdb}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -143,13 +141,6 @@ services:
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     networks:
       - rag_network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
   # ─────────────────────────────────────────
   # MLOPS — MLflow
@@ -159,11 +150,12 @@ services:
     container_name: rag_mlflow
     restart: unless-stopped
     command: >
+      /bin/sh -c "pip install --no-cache-dir psycopg2-binary==2.9.9 &&
       mlflow server
       --backend-store-uri postgresql://${POSTGRES_USER:-raguser}:${POSTGRES_PASSWORD:-ragpass}@postgres:5432/${POSTGRES_DB:-ragdb}
       --default-artifact-root s3://gold/mlflow
       --host 0.0.0.0
-      --port 5000
+      --port 5000"
     environment:
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
@@ -183,8 +175,8 @@ services:
   # ─────────────────────────────────────────
   api:
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
     container_name: rag_api
     restart: unless-stopped
     ports:
@@ -203,7 +195,7 @@ services:
       milvus:
         condition: service_healthy
     volumes:
-      - ./api:/app
+      - ./:/app
     networks:
       - rag_network
 

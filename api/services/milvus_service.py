@@ -10,7 +10,7 @@ from pymilvus import (
     DataType,
     utility,
 )
-from core.config import settings
+from api.schemas.config import settings
 
 
 class MilvusService:
