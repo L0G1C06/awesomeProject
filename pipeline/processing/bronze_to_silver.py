@@ -3,6 +3,7 @@ Pipeline — Bronze → Silver
 Limpeza, normalização e enriquecimento dos dados brutos.
 Adapte as funções de transformação ao seu domínio.
 """
+
 import json
 import os
 from io import BytesIO
@@ -11,14 +12,16 @@ from loguru import logger
 from minio import Minio
 
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
-MINIO_USER     = os.getenv("MINIO_ROOT_USER", "minioadmin")
-MINIO_PASS     = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
-BUCKET_BRONZE  = "bronze"
-BUCKET_SILVER  = "silver"
+MINIO_USER = os.getenv("MINIO_ROOT_USER", "minioadmin")
+MINIO_PASS = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
+BUCKET_BRONZE = "bronze"
+BUCKET_SILVER = "silver"
 
 
 def get_minio_client() -> Minio:
-    return Minio(MINIO_ENDPOINT, access_key=MINIO_USER, secret_key=MINIO_PASS, secure=False)
+    return Minio(
+        MINIO_ENDPOINT, access_key=MINIO_USER, secret_key=MINIO_PASS, secure=False
+    )
 
 
 def list_pending_bronze(client: Minio, prefix: str = "") -> list[str]:
@@ -38,9 +41,14 @@ def clean_record(record: dict) -> dict | None:
     - Converter tipos
     - Validar campos obrigatórios
     """
-    # Remove registros sem conteúdo principal
-    # Adapte "text" para o campo chave do seu dataset
-    text_field = record.get("text") or record.get("content") or record.get("description") or ""
+    # O schema do arXiv usa "summary" como texto principal.
+    text_field = (
+        record.get("summary")
+        or record.get("text")
+        or record.get("content")
+        or record.get("description")
+        or ""
+    )
     if not text_field or len(str(text_field).strip()) < 10:
         return None
 
@@ -49,7 +57,13 @@ def clean_record(record: dict) -> dict | None:
     # Normalização básica de strings
     for key, value in cleaned.items():
         if isinstance(value, str):
-            cleaned[key] = value.strip()
+            cleaned[key] = " ".join(value.split())
+        elif isinstance(value, list):
+            cleaned[key] = [
+                " ".join(item.split()) if isinstance(item, str) else item
+                for item in value
+                if item not in (None, "")
+            ]
 
     cleaned["_processed_at"] = datetime.now().isoformat()
     return cleaned
@@ -74,7 +88,9 @@ def transform_bronze_to_silver(client: Minio, object_key: str) -> str | None:
         return None
 
     silver_key = object_key.replace("raw/", "cleaned/")
-    content_bytes = "\n".join(json.dumps(r, ensure_ascii=False) for r in cleaned).encode("utf-8")
+    content_bytes = "\n".join(
+        json.dumps(r, ensure_ascii=False) for r in cleaned
+    ).encode("utf-8")
 
     if not client.bucket_exists(BUCKET_SILVER):
         client.make_bucket(BUCKET_SILVER)
@@ -87,7 +103,9 @@ def transform_bronze_to_silver(client: Minio, object_key: str) -> str | None:
         content_type="application/jsonlines",
     )
 
-    logger.info(f"✔ Silver: {silver_key} ({len(cleaned)}/{len(records)} registros válidos)")
+    logger.info(
+        f"✔ Silver: {silver_key} ({len(cleaned)}/{len(records)} registros válidos)"
+    )
     return silver_key
 
 

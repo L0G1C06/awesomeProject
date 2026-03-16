@@ -125,7 +125,6 @@ make pull-models  # Baixa modelos LLM e embedding
 
 ### 3. Execute o pipeline
 ```bash
-# Antes: implemente load_raw_data() em pipeline/ingestion/ingest.py
 make pipeline     # ingest → process → embed
 ```
 
@@ -158,10 +157,10 @@ rag-enterprise/
 │   └── middleware/
 │
 ├── 📂 pipeline/                # Pipeline RAG
-│   ├── ingestion/ingest.py     # ← ADAPTAR: carregamento do dataset
+│   ├── ingestion/ingest.py     # Ingestão do arXiv + persistência local/MinIO
 │   ├── processing/
-│   │   ├── bronze_to_silver.py # ← ADAPTAR: limpeza de dados
-│   │   └── silver_to_gold.py   # ← ADAPTAR: chunking
+│   │   ├── bronze_to_silver.py # Limpeza e normalização do schema do arXiv
+│   │   └── silver_to_gold.py   # Chunking para indexação
 │   └── embedding/
 │       └── embed_and_index.py  # Embeddings + Milvus
 │
@@ -208,24 +207,36 @@ Este projeto utiliza a **ArXiv Public API** para recuperar artigos científicos.
 Edite `.env` e configure:
 ```bash
 ARXIV_CATEGORY="cs.LG"  # Exemplo: Machine Learning
-ARXIV_MAX_RESULTS=500   # Quantidade de artigos para ingestão
+ARXIV_MAX_RESULTS=10000 # Quantidade de artigos para ingestão
+ARXIV_BATCH_SIZE=2000   # Máximo por página da API
+ARXIV_DELAY_SECONDS=3   # Recomendado pelo arXiv para múltiplas chamadas
 DATASET_DOMAIN="Machine Learning Research"
-DATASET_SOURCE_URL="https://arxiv.org/api/query"
+DATASET_SOURCE_URL="https://export.arxiv.org/api/query"
 ```
 
-### Passo 2: Explore no notebook
+### Passo 2: Baixe 10.000 amostras localmente
+Sem depender da infraestrutura completa, você pode salvar a amostra em disco:
+```bash
+python -m pipeline.ingestion.ingest \
+  --categories cs.LG \
+  --max-results 10000 \
+  --output-dir data/bronze \
+  --skip-minio
+```
+
+O arquivo JSONL será salvo em `data/bronze/arxiv/raw/`.
+
+### Passo 3: Explore no notebook
 ```bash
 jupyter notebook notebooks/01_dataset_exploration.ipynb
 ```
 
-### Passo 3: Implemente os TODOs
-Arquivos que precisam ser adaptados (marcados com `# TODO`):
+### Passo 4: Ajustes restantes
+Arquivos que ainda podem ser refinados conforme o domínio do projeto:
 
-1. **`pipeline/ingestion/ingest.py`** — Implementar `load_raw_data()` para chamadas a ArXiv API
-2. **`pipeline/processing/bronze_to_silver.py`** — Normalizar metadata e abstracts de artigos
-3. **`pipeline/processing/silver_to_gold.py`** — Segmentar artigos em chunks temáticos
-4. **`api/services/rag_service.py`** — Ajustar prompt para contexto científico
-5. **`.env`** — Configurar `ARXIV_CATEGORY` e `ARXIV_MAX_RESULTS`
+1. **`api/services/rag_service.py`** — Ajustar prompt para contexto científico
+2. **`.env`** — Refinar categorias, volume de ingestão e ordenação da coleta
+3. **`pipeline/embedding/embed_and_index.py`** — Ajustar estratégia de indexação conforme o volume de chunks
 
 ---
 
