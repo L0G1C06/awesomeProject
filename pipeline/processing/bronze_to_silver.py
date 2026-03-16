@@ -2,6 +2,7 @@
 Pipeline — Bronze → Silver
 Limpeza, normalização e enriquecimento dos dados brutos.
 """
+
 import json
 import os
 import re
@@ -15,19 +16,16 @@ from minio.error import S3Error
 from api.services.postgres_service import PostgresService
 
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
-MINIO_USER     = os.getenv("MINIO_ROOT_USER", "minioadmin")
-MINIO_PASS     = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
-BUCKET_BRONZE  = "bronze"
-BUCKET_SILVER  = "silver"
-DATASET_NAME   = os.getenv("DATASET_NAME", "arxiv")
-BRONZE_PREFIX  = os.getenv("BRONZE_PREFIX", f"{DATASET_NAME}/raw/")
-DATASET_DOMAIN = os.getenv("DATASET_DOMAIN", "research")
-DATASET_SOURCE_URL = os.getenv("DATASET_SOURCE_URL", "https://arxiv.org/")
-DATASET_VERSION = os.getenv("DATASET_VERSION", "1.0.0")
+MINIO_USER = os.getenv("MINIO_ROOT_USER", "minioadmin")
+MINIO_PASS = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
+BUCKET_BRONZE = "bronze"
+BUCKET_SILVER = "silver"
 
 
 def get_minio_client() -> Minio:
-    return Minio(MINIO_ENDPOINT, access_key=MINIO_USER, secret_key=MINIO_PASS, secure=False)
+    return Minio(
+        MINIO_ENDPOINT, access_key=MINIO_USER, secret_key=MINIO_PASS, secure=False
+    )
 
 
 def normalize_text(value: str) -> str:
@@ -57,34 +55,30 @@ def clean_record(record: dict) -> dict | None:
     Normaliza metadados do arXiv.
     Retorna None para descartar registros inválidos.
     """
-    arxiv_id = normalize_text(str(record.get("id", "")))
-    title = normalize_text(str(record.get("title", "")))
-    summary = normalize_text(str(record.get("summary", "")))
+    # O schema do arXiv usa "summary" como texto principal.
+    text_field = (
+        record.get("summary")
+        or record.get("text")
+        or record.get("content")
+        or record.get("description")
+        or ""
+    )
+    if not text_field or len(str(text_field).strip()) < 10:
+        return None
 
     if not arxiv_id or not title or len(summary) < 20:
         return None
 
-    authors = [normalize_text(str(a)) for a in record.get("authors", []) if normalize_text(str(a))]
-    categories = [normalize_text(str(c)) for c in record.get("categories", []) if normalize_text(str(c))]
-
-    cleaned = {
-        "source": "arxiv",
-        "id": arxiv_id,
-        "title": title,
-        "summary": summary,
-        "authors": authors,
-        "categories": categories,
-        "primary_category": normalize_text(str(record.get("primary_category", ""))),
-        "published": normalize_text(str(record.get("published", ""))),
-        "updated": normalize_text(str(record.get("updated", ""))),
-        "comment": normalize_text(str(record.get("comment", ""))),
-        "journal_ref": normalize_text(str(record.get("journal_ref", ""))),
-        "doi": normalize_text(str(record.get("doi", ""))),
-        "pdf_url": normalize_text(str(record.get("pdf_url", ""))),
-        "query": normalize_text(str(record.get("query", ""))),
-        "abstract_length": len(summary),
-        "_processed_at": datetime.now().isoformat(),
-    }
+    # Normalização básica de strings
+    for key, value in cleaned.items():
+        if isinstance(value, str):
+            cleaned[key] = " ".join(value.split())
+        elif isinstance(value, list):
+            cleaned[key] = [
+                " ".join(item.split()) if isinstance(item, str) else item
+                for item in value
+                if item not in (None, "")
+            ]
 
     return cleaned
 
@@ -123,8 +117,10 @@ def transform_bronze_to_silver(client: Minio, object_key: str) -> dict | None:
         logger.warning(f"Nenhum registro válido em {object_key}")
         return None
 
-    content_bytes = "\n".join(json.dumps(r, ensure_ascii=False) for r in cleaned).encode("utf-8")
-    checksum = compute_checksum(content_bytes)
+    silver_key = object_key.replace("raw/", "cleaned/")
+    content_bytes = "\n".join(
+        json.dumps(r, ensure_ascii=False) for r in cleaned
+    ).encode("utf-8")
 
     if not client.bucket_exists(BUCKET_SILVER):
         client.make_bucket(BUCKET_SILVER)
@@ -137,55 +133,10 @@ def transform_bronze_to_silver(client: Minio, object_key: str) -> dict | None:
         content_type="application/jsonlines",
     )
 
-    logger.info(f"✔ Silver: {silver_key} ({len(cleaned)}/{len(records)} registros válidos)")
-    return {
-        "bronze_key": object_key,
-        "silver_key": silver_key,
-        "row_count": len(cleaned),
-        "size_bytes": len(content_bytes),
-        "checksum": checksum,
-        "skipped": False,
-    }
-
-
-def register_silver_metadata(db: PostgresService, info: dict) -> None:
-    if info.get("skipped"):
-        return
-
-    dataset_id: str | None = None
-    bronze_meta = db.get_data_file(BUCKET_BRONZE, info["bronze_key"])
-    if bronze_meta:
-        dataset_id = str(bronze_meta.get("dataset_id") or "")
-    if not dataset_id:
-        dataset_id = db.ensure_dataset(
-            name=DATASET_NAME,
-            domain=DATASET_DOMAIN,
-            source_url=DATASET_SOURCE_URL,
-            version=DATASET_VERSION,
-            description=f"Dataset {DATASET_NAME} processado para camada silver",
-        )
-
-    data_file_id = db.register_data_file(
-        dataset_id=dataset_id,
-        layer="silver",
-        bucket=BUCKET_SILVER,
-        object_key=info["silver_key"],
-        file_format="jsonl",
-        size_bytes=info["size_bytes"],
-        row_count=info["row_count"],
-        checksum=info["checksum"],
-        status="done",
+    logger.info(
+        f"✔ Silver: {silver_key} ({len(cleaned)}/{len(records)} registros válidos)"
     )
-    db.log_audit(
-        entity="data_files",
-        entity_id=data_file_id,
-        action="transform_bronze_to_silver",
-        details={
-            "from": info["bronze_key"],
-            "to": info["silver_key"],
-            "rows": info["row_count"],
-        },
-    )
+    return silver_key
 
 
 def run():
