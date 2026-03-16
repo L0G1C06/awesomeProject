@@ -40,7 +40,7 @@ ARXIV_NAMESPACES = {
     "arxiv": "http://arxiv.org/schemas/atom",
     "opensearch": "http://a9.com/-/spec/opensearch/1.1/",
 }
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
 MINIO_USER = os.getenv("MINIO_ROOT_USER", "minioadmin")
 MINIO_PASS = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
 
@@ -321,6 +321,7 @@ def ingest_to_bronze(
     Salva registros brutos no MinIO bucket Bronze como JSON lines.
     Retorna o object_key gerado.
     """
+    client = get_minio_client()
     if not client.bucket_exists(BUCKET_BRONZE):
         client.make_bucket(BUCKET_BRONZE)
 
