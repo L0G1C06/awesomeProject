@@ -1,6 +1,24 @@
-# 🔍 RAG Enterprise Platform
+# 🔍 RAG Enterprise Platform — ArXiv Dataset
 
 > Plataforma completa de Retrieval-Augmented Generation com Governança Medallion, totalmente local e containerizada.
+> **Dataset**: ArXiv (https://info.arxiv.org/help/api/index.html)
+
+---
+
+## 👥 Equipe
+
+| Nome | Email | Matrícula | Papel |
+|------|-------|-----------|-------|
+| **Eduardo Weber Maldaner** | eduwmaldaner@gmail.com | 211948 | Product Owner (PO) |
+| **Lucas Carmargo Oliveira** | Lucaslco2005@gmail.com | 222231 | Scrum Developer |
+| **Jeferson Oliveira Moreira** | jef.moreira1@gmail.com | 212148 | Scrum Developer |
+
+### 📋 Informações do Projeto
+
+- **Turma**: CP901TAN1
+- **Product Owner**: Eduardo Weber Maldaner
+- **Dataset Source**: ArXiv Public API
+- **Objetivo**: Plataforma RAG para consulta e análise de artigos científicos do ArXiv
 
 ---
 
@@ -27,9 +45,59 @@
 
 | Camada | Bucket | Conteúdo |
 |--------|--------|----------|
-| 🥉 **Bronze** | `bronze/` | Dados brutos — `.jsonl` sem transformação |
-| 🥈 **Silver** | `silver/` | Dados limpos e normalizados |
-| 🥇 **Gold**   | `gold/`   | Chunks prontos para embedding |
+| 🥉 **Bronze** | `bronze/` | Dados brutos — artigos ArXiv em `.jsonl` sem transformação |
+| 🥈 **Silver** | `silver/` | Dados limpos e normalizados — abstracts e metadados estruturados |
+| 🥇 **Gold**   | `gold/`   | Chunks prontos para embedding — seções de artigos segmentadas |
+
+---
+
+## 📚 Backlog Inicial
+
+### Épico 1: Definição de Escopo e Requisitos
+
+| ID | Tarefa | Descrição | Responsável | Status |
+|----|--------|-----------|-------------|--------|
+| **BS-1** | Escolha do Domínio | Definir foco de pesquisa no ArXiv (ex: Machine Learning, Computer Vision, NLP) | Eduardo | 📋 Backlog |
+| **BS-2** | Definição da Empresa Fictícia | Criar contexto de negócio para a plataforma (ex: "TechInsights AI Research") | Jeferson | 📋 Backlog |
+| **BS-3** | Problema de Negócio | Documentar o problema que a plataforma RAG resolve para a empresa | Eduardo | 📋 Backlog |
+| **BS-4** | Levantamento de Requisitos Funcionais | Mapear features necessárias (busca vetorial, filtros, exportação) | Lucas | 📋 Backlog |
+| **BS-5** | Levantamento de Requisitos Não-Funcionais | Definir SLAs, performance, escalabilidade e segurança | Jeferson | 📋 Backlog |
+| **BS-6** | Definição de Papéis Scrum | Alinhar responsabilidades: Scrum Master, Product Owner, Developers | Eduardo | 📋 Backlog |
+
+### Épico 2: Integração com ArXiv API
+
+| ID | Tarefa | Descrição | Responsável | Status |
+|----|--------|-----------|-------------|--------|
+| **AX-1** | Estudo da ArXiv API | Documentar endpoints, limites de taxa e formato de dados | Jeferson | 📋 Backlog |
+| **AX-2** | Implementar Connector ArXiv | Criar módulo de conexão com a API | Jeferson | 📋 Backlog |
+| **AX-3** | ETL Bronze → Silver (ArXiv) | Normalizar metadata e abstracts dos artigos | Lucas | 📋 Backlog |
+| **AX-4** | ETL Silver → Gold | Segmentar artigos em chunks otimizados | Lucas | 📋 Backlog |
+
+### Épico 3: Implementação RAG
+
+| ID | Tarefa | Descrição | Responsável | Status |
+|----|--------|-----------|-------------|--------|
+| **RAG-1** | Embeddings + Indexação Milvus | Vetorizar chunks e indexar em Milvus | Lucas | 📋 Backlog |
+| **RAG-2** | Busca Vetorial | Implementar recuperação top-k com COSINE similarity | Lucas | 📋 Backlog |
+| **RAG-3** | Geração com LLM | Construir prompts e gerar respostas via Ollama | Eduardo | 📋 Backlog |
+| **RAG-4** | Prompt Engineering | Otimizar templates de prompt para contexto científico | Eduardo | 📋 Backlog |
+
+### Épico 4: Interface e Experiência
+
+| ID | Tarefa | Descrição | Responsável | Status |
+|----|--------|-----------|-------------|--------|
+| **UI-1** | Frontend Gradio | Criar interface de consulta | Jeferson | 📋 Backlog |
+| **UI-2** | Filtros Avançados | Permitir filtrar por categoria, data, autor do ArXiv | Jeferson | 📋 Backlog |
+| **UI-3** | Exibição de Resultados | Mostrar snippets com highlightning de trechos | Lucas | 📋 Backlog |
+| **UI-4** | Exportação de Resultados | Gerar relatórios em PDF/CSV | Jeferson | 📋 Backlog |
+
+### Épico 5: Observabilidade e Monitoramento
+
+| ID | Tarefa | Descrição | Responsável | Status |
+|----|--------|-----------|-------------|--------|
+| **OBS-1** | MLflow Tracking | Registrar queries, latência e qualidade de respostas | Lucas | 📋 Backlog |
+| **OBS-2** | Dashboard de Performance | Criar dashboard com métricas de uso | Eduardo | 📋 Backlog |
+| **OBS-3** | Alertas e Logs | Configurar logs estruturados e alertas | Jeferson | 📋 Backlog |
 
 ### Ferramentas de Dados
 
@@ -62,7 +130,6 @@ make pull-models  # Baixa modelos LLM e embedding
 
 ### 3. Execute o pipeline
 ```bash
-# Antes: implemente load_raw_data() em pipeline/ingestion/ingest.py
 make pipeline     # ingest → process → embed
 ```
 
@@ -95,10 +162,10 @@ rag-enterprise/
 │   └── middleware/
 │
 ├── 📂 pipeline/                # Pipeline RAG
-│   ├── ingestion/ingest.py     # ← ADAPTAR: carregamento do dataset
+│   ├── ingestion/ingest.py     # Ingestão do arXiv + persistência local/MinIO
 │   ├── processing/
-│   │   ├── bronze_to_silver.py # ← ADAPTAR: limpeza de dados
-│   │   └── silver_to_gold.py   # ← ADAPTAR: chunking
+│   │   ├── bronze_to_silver.py # Limpeza e normalização do schema do arXiv
+│   │   └── silver_to_gold.py   # Chunking para indexação
 │   └── embedding/
 │       └── embed_and_index.py  # Embeddings + Milvus
 │
@@ -123,27 +190,58 @@ rag-enterprise/
 
 ---
 
-## 🔧 Configurando seu Dataset
+## 🔧 Configurando seu Dataset - ArXiv
 
-### Passo 1: Escolha o dataset
-Consulte as fontes sugeridas:
-- https://github.com/awesomedata/awesome-public-datasets
-- https://github.com/petrobras/3W
-- https://github.com/jonathanwvd/awesome-industrial-datasets
+### 📋 Dataset: ArXiv Open Access
 
-### Passo 2: Explore no notebook
+Este projeto utiliza a **ArXiv Public API** para recuperar artigos científicos.
+
+**Documentação**: https://info.arxiv.org/help/api/index.html
+
+**Categorias disponíveis no ArXiv**:
+- `cs.AI` — Artificial Intelligence
+- `cs.LG` — Machine Learning
+- `cs.CV` — Computer Vision
+- `cs.NLP` — Natural Language Processing
+- `cs.CL` — Computation and Language
+- `physics.data-an` — Data Analysis
+- `stat.ML` — Statistics Machine Learning
+- E muitas outras...
+
+### Passo 1: Defina a categoria de pesquisa
+Edite `.env` e configure:
+```bash
+ARXIV_CATEGORY="cs.LG"  # Exemplo: Machine Learning
+ARXIV_MAX_RESULTS=10000 # Quantidade de artigos para ingestão
+ARXIV_BATCH_SIZE=2000   # Máximo por página da API
+ARXIV_DELAY_SECONDS=3   # Recomendado pelo arXiv para múltiplas chamadas
+DATASET_DOMAIN="Machine Learning Research"
+DATASET_SOURCE_URL="https://export.arxiv.org/api/query"
+```
+
+### Passo 2: Baixe 10.000 amostras localmente
+Sem depender da infraestrutura completa, você pode salvar a amostra em disco:
+```bash
+python -m pipeline.ingestion.ingest \
+  --categories cs.LG \
+  --max-results 10000 \
+  --output-dir data/bronze \
+  --skip-minio
+```
+
+O arquivo JSONL será salvo em `data/bronze/arxiv/raw/`.
+
+### Passo 3: Explore no notebook
 ```bash
 jupyter notebook notebooks/01_dataset_exploration.ipynb
 ```
 
-### Passo 3: Implemente os TODOs
-Arquivos que precisam ser adaptados (marcados com `# TODO`):
+### Passo 4: Ajustes restantes
+Arquivos que ainda podem ser refinados conforme o domínio do projeto:
 
-1. **`pipeline/ingestion/ingest.py`** — `load_raw_data()`
-2. **`pipeline/processing/bronze_to_silver.py`** — `clean_record()`
-3. **`pipeline/processing/silver_to_gold.py`** — `extract_text()` e `extract_metadata()`
-4. **`api/services/rag_service.py`** — `_build_prompt()`
-5. **`.env`** — `DATASET_DOMAIN` e `DATASET_SOURCE_URL`
+1. **`api/services/rag_service.py`** — Ajustar prompt para contexto científico
+2. **`.env`** — Refinar categorias, volume de ingestão e ordenação da coleta
+3. **`pipeline/embedding/embed_and_index.py`** — Ajustar estratégia de indexação conforme o volume de chunks
 
 ### Ingestão em volume (Data Lake)
 
@@ -253,8 +351,32 @@ make test-integration  # Requer serviços rodando
 
 ---
 
+## 🎯 Papéis Scrum
+
+| Papel | Descrição | Responsável |
+|-------|-----------|-------------|
+| **Product Owner (PO)** | Define requisitos, prioriza backlog, valida entregas | Eduardo Weber Maldaner |
+| **Scrum Master** | Facilita cerimônias, remove impedimentos, protege o time | Eduardo Weber Maldaner |
+| **Developer** | Implementa features, garante qualidade, autoorganizado | Lucas Carmargo, Jeferson |
+
+### Cerimônias
+
+- **Sprint**: 1 semana
+- **Planning**: Segundas (10:00) — Define sprint backlog
+- **Daily**: Terça-Sexta (09:00) — Sincronização rápida
+- **Review**: Segundas fim de sprint (14:00) — Demonstra entregáveis
+- **Retrospectiva**: Segundas fim de sprint (15:00) — Melhoria contínua
+
+### Objetivo do Sprint 1
+
+✅ Completar épico **BS** (Definição de Escopo e Requisitos)
+✅ Iniciar integração com ArXiv API (**AX-1**, **AX-2**)
+
+---
+
 ## 📚 Referências
 
+- [ArXiv API Documentation](https://info.arxiv.org/help/api/index.html)
 - [Ollama Models](https://ollama.com/library)
 - [Milvus Docs](https://milvus.io/docs)
 - [MLflow Docs](https://mlflow.org/docs/latest)
