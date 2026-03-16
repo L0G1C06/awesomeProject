@@ -1,15 +1,19 @@
 """
 Pipeline — Bronze → Silver
 Limpeza, normalização e enriquecimento dos dados brutos.
-Adapte as funções de transformação ao seu domínio.
 """
 
 import json
 import os
+import re
+import hashlib
 from io import BytesIO
 from datetime import datetime
 from loguru import logger
 from minio import Minio
+from minio.error import S3Error
+
+from api.services.postgres_service import PostgresService
 
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_USER = os.getenv("MINIO_ROOT_USER", "minioadmin")
@@ -24,22 +28,32 @@ def get_minio_client() -> Minio:
     )
 
 
-def list_pending_bronze(client: Minio, prefix: str = "") -> list[str]:
-    """Lista objetos no bucket bronze que ainda não foram processados."""
+def normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def object_exists(client: Minio, bucket: str, object_key: str) -> bool:
+    try:
+        client.stat_object(bucket, object_key)
+        return True
+    except S3Error:
+        return False
+
+
+def compute_checksum(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def list_pending_bronze(client: Minio, prefix: str = BRONZE_PREFIX) -> list[str]:
+    """Lista objetos do Bronze para processamento."""
     objects = client.list_objects(BUCKET_BRONZE, prefix=prefix, recursive=True)
-    return [obj.object_name for obj in objects]
+    return [obj.object_name for obj in objects if obj.object_name.endswith(".jsonl")]
 
 
 def clean_record(record: dict) -> dict | None:
     """
-    TODO: Implemente a limpeza específica do seu dataset.
-    Retorna None para descartar o registro.
-
-    Exemplos genéricos:
-    - Remover campos nulos/vazios
-    - Normalizar strings
-    - Converter tipos
-    - Validar campos obrigatórios
+    Normaliza metadados do arXiv.
+    Retorna None para descartar registros inválidos.
     """
     # O schema do arXiv usa "summary" como texto principal.
     text_field = (
@@ -52,7 +66,8 @@ def clean_record(record: dict) -> dict | None:
     if not text_field or len(str(text_field).strip()) < 10:
         return None
 
-    cleaned = {k: v for k, v in record.items() if v is not None}
+    if not arxiv_id or not title or len(summary) < 20:
+        return None
 
     # Normalização básica de strings
     for key, value in cleaned.items():
@@ -65,12 +80,19 @@ def clean_record(record: dict) -> dict | None:
                 if item not in (None, "")
             ]
 
-    cleaned["_processed_at"] = datetime.now().isoformat()
     return cleaned
 
 
-def transform_bronze_to_silver(client: Minio, object_key: str) -> str | None:
+def transform_bronze_to_silver(client: Minio, object_key: str) -> dict | None:
     """Lê um arquivo do Bronze, limpa e salva no Silver."""
+    if "/raw/" not in object_key:
+        return None
+
+    silver_key = object_key.replace("/raw/", "/cleaned/", 1)
+    if object_exists(client, BUCKET_SILVER, silver_key):
+        logger.info(f"Silver já existe, pulando: {silver_key}")
+        return {"bronze_key": object_key, "silver_key": silver_key, "skipped": True}
+
     try:
         response = client.get_object(BUCKET_BRONZE, object_key)
         raw_content = response.read().decode("utf-8")
@@ -79,7 +101,15 @@ def transform_bronze_to_silver(client: Minio, object_key: str) -> str | None:
         logger.error(f"Erro ao ler {object_key}: {e}")
         return None
 
-    records = [json.loads(line) for line in raw_content.strip().split("\n") if line]
+    records = []
+    for line in raw_content.strip().split("\n"):
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            logger.warning(f"Linha inválida ignorada em {object_key}")
+
     cleaned = [clean_record(r) for r in records]
     cleaned = [r for r in cleaned if r is not None]
 
@@ -112,11 +142,18 @@ def transform_bronze_to_silver(client: Minio, object_key: str) -> str | None:
 def run():
     logger.info("=== Bronze → Silver iniciado ===")
     client = get_minio_client()
+    if not client.bucket_exists(BUCKET_BRONZE):
+        logger.warning("Bucket bronze não existe. Nada para processar.")
+        return
+
+    db = PostgresService()
     bronze_files = list_pending_bronze(client)
     logger.info(f"Arquivos Bronze encontrados: {len(bronze_files)}")
 
     for obj_key in bronze_files:
-        transform_bronze_to_silver(client, obj_key)
+        info = transform_bronze_to_silver(client, obj_key)
+        if info:
+            register_silver_metadata(db, info)
 
     logger.info("=== Bronze → Silver concluído ===")
 

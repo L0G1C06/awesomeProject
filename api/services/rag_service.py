@@ -6,12 +6,11 @@ import uuid
 from loguru import logger
 import mlflow
 import ollama
-from pymilvus import connections, Collection
 
 from api.schemas.query import QueryResponse, RetrievedDoc
 from api.services.milvus_service import MilvusService
 from api.services.postgres_service import PostgresService
-from core.config import settings
+from api.schemas.config import settings
 
 
 class RAGService:
@@ -92,6 +91,8 @@ class RAGService:
                 response=answer,
                 llm_model=llm_model,
                 latency_ms=latency_ms,
+                top_k=top_k,
+                embed_model=settings.OLLAMA_EMBED_MODEL,
             )
 
         return QueryResponse(

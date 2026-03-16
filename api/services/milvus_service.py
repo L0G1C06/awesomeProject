@@ -10,7 +10,7 @@ from pymilvus import (
     DataType,
     utility,
 )
-from core.config import settings
+from api.schemas.config import settings
 
 
 class MilvusService:
@@ -64,13 +64,19 @@ class MilvusService:
         )
         hits = []
         for hit in results[0]:
+            content = hit.entity.get("content")
+            metadata = hit.entity.get("metadata")
             hits.append({
                 "id": hit.id,
-                "content": hit.entity.get("content"),
+                "content": content,
                 "score": hit.score,
-                "metadata": hit.entity.get("metadata", {}),
+                "metadata": metadata or {},
             })
         return hits
+
+    def flush(self) -> None:
+        """Força persistência dos segmentos para refletir contagem/estado final."""
+        self.collection.flush()
 
     def delete_collection(self):
         from pymilvus import utility

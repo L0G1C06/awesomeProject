@@ -24,6 +24,7 @@ graph TB
 
     subgraph RELACIONAL["🗃️ PostgreSQL"]
         META[Metadados\n+ Auditoria]
+        VER[Versionamento\nrag_dataset_versions]
         RUNS[rag_runs]
         DOCS[documents]
     end
@@ -58,6 +59,7 @@ graph TB
     API --> COL
     API --> LLM
     API --> META
+    API --> VER
     API --> RUNS
     API --> EXP
     API --> PROMPTS

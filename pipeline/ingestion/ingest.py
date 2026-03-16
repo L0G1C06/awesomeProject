@@ -321,7 +321,6 @@ def ingest_to_bronze(
     Salva registros brutos no MinIO bucket Bronze como JSON lines.
     Retorna o object_key gerado.
     """
-    client = get_minio_client()
     if not client.bucket_exists(BUCKET_BRONZE):
         client.make_bucket(BUCKET_BRONZE)
 

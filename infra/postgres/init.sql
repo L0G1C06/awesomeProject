@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ─────────────────────────────────────────────────────────────
 --  CAMADA: Controle de datasets ingeridos
 -- ─────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS datasets (
+CREATE TABLE IF NOT EXISTS rag_datasets (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name        VARCHAR(255) NOT NULL,
     domain      VARCHAR(100) NOT NULL,
@@ -22,11 +22,25 @@ CREATE TABLE IF NOT EXISTS datasets (
 );
 
 -- ─────────────────────────────────────────────────────────────
+--  VERSIONAMENTO: Histórico de versões por dataset
+-- ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS rag_dataset_versions (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    dataset_id  UUID NOT NULL REFERENCES rag_datasets(id) ON DELETE CASCADE,
+    version     VARCHAR(50) NOT NULL,
+    source_url  TEXT,
+    notes       TEXT,
+    created_by  VARCHAR(100) NOT NULL DEFAULT 'system',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (dataset_id, version)
+);
+
+-- ─────────────────────────────────────────────────────────────
 --  CAMADA MEDALLION: Rastreamento de arquivos por camada
 -- ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS data_files (
     id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    dataset_id    UUID REFERENCES datasets(id) ON DELETE CASCADE,
+    dataset_id    UUID REFERENCES rag_datasets(id) ON DELETE CASCADE,
     layer         VARCHAR(10) NOT NULL CHECK (layer IN ('bronze', 'silver', 'gold')),
     bucket        VARCHAR(100) NOT NULL,
     object_key    TEXT NOT NULL,
@@ -94,6 +108,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 -- ─────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_data_files_layer    ON data_files (layer, status);
 CREATE INDEX IF NOT EXISTS idx_data_files_dataset  ON data_files (dataset_id);
+CREATE INDEX IF NOT EXISTS idx_dataset_versions_ds ON rag_dataset_versions (dataset_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_documents_file      ON documents (data_file_id);
 CREATE INDEX IF NOT EXISTS idx_documents_metadata  ON documents USING GIN (metadata);
 CREATE INDEX IF NOT EXISTS idx_rag_runs_created    ON rag_runs (created_at DESC);
@@ -110,6 +125,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_datasets_updated
-    BEFORE UPDATE ON datasets
+CREATE TRIGGER trg_rag_datasets_updated
+    BEFORE UPDATE ON rag_datasets
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

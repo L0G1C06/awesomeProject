@@ -99,6 +99,11 @@
 | **OBS-2** | Dashboard de Performance | Criar dashboard com métricas de uso | Eduardo | 📋 Backlog |
 | **OBS-3** | Alertas e Logs | Configurar logs estruturados e alertas | Jeferson | 📋 Backlog |
 
+### Ferramentas de Dados
+
+- **PostgreSQL**: metadados do pipeline, controle de versionamento por dataset e auditoria de eventos.
+- **Milvus**: armazenamento de embeddings e indexação vetorial para retrieval semântico.
+
 ---
 
 ## 🚀 Quick Start
@@ -237,6 +242,24 @@ Arquivos que ainda podem ser refinados conforme o domínio do projeto:
 1. **`api/services/rag_service.py`** — Ajustar prompt para contexto científico
 2. **`.env`** — Refinar categorias, volume de ingestão e ordenação da coleta
 3. **`pipeline/embedding/embed_and_index.py`** — Ajustar estratégia de indexação conforme o volume de chunks
+
+### Ingestão em volume (Data Lake)
+
+Para puxar mais dados do arXiv sem estourar memória, a ingestão Bronze usa paginação:
+
+- `ARXIV_MAX_RESULTS`: total alvo de registros por execução
+- `ARXIV_PAGE_SIZE`: tamanho de cada página/arquivo bruto
+- `ARXIV_MAX_PAGES`: limite de páginas (`0` = sem limite)
+- `ARXIV_REQUEST_DELAY_SECONDS`: intervalo entre chamadas da API
+- `ARXIV_DEDUP_IN_RUN`: remove IDs duplicados dentro da mesma execução
+- `ARXIV_RETRY_ATTEMPTS`, `ARXIV_RETRY_BACKOFF_SECONDS`, `ARXIV_RETRY_BACKOFF_FACTOR`: resiliência para erro 429/5xx da API
+- `ARXIV_FAIL_FAST`: se `false`, mantém dados já coletados mesmo com falha em uma página
+
+Exemplo de coleta maior:
+
+```bash
+ARXIV_MAX_RESULTS=20000 ARXIV_PAGE_SIZE=200 make ingest
+```
 
 ---
 

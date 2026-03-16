@@ -5,10 +5,14 @@ Prepara documentos finais para consumo pelo RAG (chunking, formatação).
 
 import json
 import os
+import hashlib
 from io import BytesIO
 from loguru import logger
 from minio import Minio
+from minio.error import S3Error
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from api.services.postgres_service import PostgresService
 
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_USER = os.getenv("MINIO_ROOT_USER", "minioadmin")
@@ -25,10 +29,21 @@ def get_minio_client() -> Minio:
     )
 
 
+def object_exists(client: Minio, bucket: str, object_key: str) -> bool:
+    try:
+        client.stat_object(bucket, object_key)
+        return True
+    except S3Error:
+        return False
+
+
+def compute_checksum(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
 def extract_text(record: dict) -> str:
     """
-    TODO: Adapte conforme o campo de texto do seu dataset.
-    Concatena campos relevantes em um único texto para indexação.
+    Monta o texto final indexável com base nos metadados do arXiv.
     """
     parts = []
     for field in ["title", "summary", "text", "content", "description"]:
@@ -39,7 +54,7 @@ def extract_text(record: dict) -> str:
 
 def extract_metadata(record: dict) -> dict:
     """
-    TODO: Adapte os campos de metadados do seu dataset.
+    Mantém metadados relevantes para filtros e auditoria.
     """
     metadata: dict = {}
     ignored_fields = {"text", "content", "description", "summary", "_processed_at"}
@@ -78,7 +93,15 @@ def chunk_and_prepare(records: list[dict]) -> list[dict]:
     return chunks
 
 
-def transform_silver_to_gold(client: Minio, object_key: str) -> str | None:
+def transform_silver_to_gold(client: Minio, object_key: str) -> dict | None:
+    if "/cleaned/" not in object_key:
+        return None
+
+    gold_key = object_key.replace("/cleaned/", "/chunks/", 1)
+    if object_exists(client, BUCKET_GOLD, gold_key):
+        logger.info(f"Gold já existe, pulando: {gold_key}")
+        return {"silver_key": object_key, "gold_key": gold_key, "skipped": True}
+
     try:
         response = client.get_object(BUCKET_SILVER, object_key)
         raw = response.read().decode("utf-8")
@@ -118,11 +141,18 @@ def transform_silver_to_gold(client: Minio, object_key: str) -> str | None:
 def run():
     logger.info("=== Silver → Gold iniciado ===")
     client = get_minio_client()
-    objects = list(client.list_objects(BUCKET_SILVER, recursive=True))
+    if not client.bucket_exists(BUCKET_SILVER):
+        logger.warning("Bucket silver não existe. Nada para processar.")
+        return
+
+    db = PostgresService()
+    objects = list(client.list_objects(BUCKET_SILVER, prefix=SILVER_PREFIX, recursive=True))
     logger.info(f"Arquivos Silver encontrados: {len(objects)}")
 
     for obj in objects:
-        transform_silver_to_gold(client, obj.object_name)
+        info = transform_silver_to_gold(client, obj.object_name)
+        if info:
+            register_gold_metadata(db, info)
 
     logger.info("=== Silver → Gold concluído ===")
 
