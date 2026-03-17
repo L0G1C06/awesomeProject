@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     MILVUS_COLLECTION: str = "rag_documents"
 
     # Ollama
-    OLLAMA_HOST: str = "http://ollama:11434"
-    OLLAMA_LLM_MODEL: str = "llama3.2"
+    OLLAMA_HOST: str = "http://localhost:11434"
+    OLLAMA_LLM_MODEL: str = "mistral"
     OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
     OLLAMA_EMBED_DIMENSION: int = 768
 

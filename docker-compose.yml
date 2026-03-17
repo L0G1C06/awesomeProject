@@ -129,18 +129,18 @@ services:
   # ─────────────────────────────────────────
   # LLM LOCAL — Ollama
   # ─────────────────────────────────────────
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   container_name: rag_ollama
-  #   restart: unless-stopped
-  #   ports:
-  #     - "11434:11434"
-  #   volumes:
-  #     - ollama_data:/root/.ollama
-  #     - ./infra/ollama/entrypoint.sh:/entrypoint.sh
-  #   entrypoint: ["/bin/sh", "/entrypoint.sh"]
-  #   networks:
-  #     - rag_network
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./infra/ollama/entrypoint.sh:/entrypoint.sh
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    networks:
+      - rag_network
 
   # ─────────────────────────────────────────
   # MLOPS — MLflow

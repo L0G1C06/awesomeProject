@@ -74,10 +74,21 @@ class RAGService:
             )
             answer = response["message"]["content"]
 
+            # Captura tokens da resposta do Ollama
+            prompt_tokens    = response.get("prompt_eval_count", 0)
+            response_tokens  = response.get("eval_count", 0)
+            total_tokens     = prompt_tokens + response_tokens
+
             latency_ms = int((time.time() - start) * 1000)
 
             # ── 5. Log no MLflow ───────────────────────────────
-            mlflow.log_metrics({"latency_ms": latency_ms, "docs_retrieved": len(retrieved_docs)})
+            mlflow.log_metrics({
+                "latency_ms":      latency_ms,
+                "docs_retrieved":  len(retrieved_docs),
+                "prompt_tokens":   prompt_tokens,
+                "response_tokens": response_tokens,
+                "total_tokens":    total_tokens,
+            })
             mlflow.log_text(prompt, "prompt.txt")
             mlflow.log_text(answer, "response.txt")
 
