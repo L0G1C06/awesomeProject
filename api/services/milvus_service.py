@@ -52,6 +52,30 @@ class MilvusService:
             {"doc_uuid": doc_uuid, "content": content, "embedding": embedding, "metadata": metadata}
         ])
         return res.primary_keys[0]
+    
+    def insert_batch(
+        self,
+        doc_ids: list[str],
+        contents: list[str],
+        embeddings: list[list[float]],
+        metadatas: list[dict],
+    ) -> list[int]:
+        """Insere um lote de documentos e retorna os primary keys gerados."""
+        self.collection.load()
+
+        rows = [
+            {
+                "doc_uuid":  doc_id,
+                "content":   content[:8192],          # respeita max_length do schema
+                "embedding": embedding,
+                "metadata":  metadata,
+            }
+            for doc_id, content, embedding, metadata
+            in zip(doc_ids, contents, embeddings, metadatas)
+        ]
+
+        res = self.collection.insert(rows)
+        return res.primary_keys
 
     def search(self, vector: list[float], top_k: int = 5, collection_name: str = None) -> list[dict]:
         self.collection.load()
