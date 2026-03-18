@@ -34,14 +34,3 @@ async def rag_query(
     except Exception as e:
         logger.error(f"Erro na query RAG: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/feedback", summary="Registra feedback do usuário")
-async def submit_feedback(
-    run_id: str,
-    feedback: int,  # -1, 0, 1
-    service: RAGService = Depends(get_rag_service),
-):
-    """Registra avaliação humana do resultado RAG."""
-    await service.register_feedback(run_id=run_id, feedback=feedback)
-    return {"status": "ok", "run_id": run_id}
