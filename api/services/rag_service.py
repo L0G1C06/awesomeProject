@@ -38,7 +38,7 @@ class RAGService:
         self.hf = HuggingFaceService()
 
     async def query(self, query: str, top_k: int = 5, llm_model: str = None) -> QueryResponse:
-        llm_model = llm_model or settings.HF_LLM_MODEL
+        llm_model = settings.HF_LLM_MODEL
         run_id = str(uuid.uuid4())
         start = time.time()
 

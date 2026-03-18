@@ -29,7 +29,6 @@ async def rag_query(
         result = await service.query(
             query=request.query,
             top_k=request.top_k,
-            llm_model=request.llm_model,
         )
         return result
     except Exception as e:
