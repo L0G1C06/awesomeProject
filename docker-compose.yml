@@ -129,18 +129,18 @@ services:
   # ─────────────────────────────────────────
   # LLM LOCAL — Ollama
   # ─────────────────────────────────────────
-  ollama:
-    image: ollama/ollama:latest
-    container_name: rag_ollama
-    restart: unless-stopped
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-      - ./infra/ollama/entrypoint.sh:/entrypoint.sh
-    entrypoint: ["/bin/sh", "/entrypoint.sh"]
-    networks:
-      - rag_network
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: rag_ollama
+  #   restart: unless-stopped
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #     - ./infra/ollama/entrypoint.sh:/entrypoint.sh
+  #   entrypoint: ["/bin/sh", "/entrypoint.sh"]
+  #   networks:
+  #     - rag_network
 
   # ─────────────────────────────────────────
   # MLOPS — MLflow
@@ -150,10 +150,12 @@ services:
     container_name: rag_mlflow
     restart: unless-stopped
     command: >
-      /bin/sh -c "pip install --no-cache-dir psycopg2-binary==2.9.9 &&
+      /bin/sh -c "pip install --no-cache-dir psycopg2-binary==2.9.9 boto3 &&
       mlflow server
       --backend-store-uri postgresql://${POSTGRES_USER:-raguser}:${POSTGRES_PASSWORD:-ragpass}@postgres:5432/${POSTGRES_DB:-ragdb}
       --default-artifact-root s3://gold/mlflow
+      --artifacts-destination s3://gold/mlflow
+      --serve-artifacts
       --host 0.0.0.0
       --port 5000"
     environment:

@@ -19,8 +19,6 @@ class RetrievedDoc(BaseModel):
 
 class QueryResponse(BaseModel):
     run_id: str
-    query: str
-    answer: str
     retrieved_docs: list[RetrievedDoc] = Field(default_factory=list)
     llm_model: str
     latency_ms: int

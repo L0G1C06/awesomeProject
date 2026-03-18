@@ -1,10 +1,7 @@
 """Configurações centrais da aplicação via pydantic-settings."""
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 class Settings(BaseSettings):
-
     # MinIO
     MINIO_ENDPOINT: str = "localhost:9000"
     MINIO_ROOT_USER: str = "minioadmin"
@@ -24,6 +21,11 @@ class Settings(BaseSettings):
     OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
     OLLAMA_EMBED_DIMENSION: int = 768
 
+    # HuggingFace ← adicionado
+    HUGGINGFACE_API_TOKEN: str = ""
+    HF_LLM_MODEL: str = "meta-llama/Meta-Llama-3-8B-Instruct"
+    HF_EMBED_MODEL: str = "BAAI/bge-base-en-v1.5" 
+
     # MLflow
     MLFLOW_TRACKING_URI: str = "http://localhost:5000"
     MLFLOW_EXPERIMENT_NAME: str = "rag-enterprise"
@@ -36,8 +38,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        extra="ignore"  # 👈 resolve o erro
+        extra="ignore"
     )
-
 
 settings = Settings()
