@@ -2,6 +2,9 @@
 Pipeline — Ingestão Bronze
 Baixa artigos do arXiv, salva uma cópia local em JSONL e, se disponível,
 publica o mesmo lote no bucket Bronze do MinIO.
+
+Suporta múltiplos lotes de categorias independentes (ex.: cs.LG + q-bio.NC)
+que são buscados separadamente e salvos juntos no mesmo dataset.
 """
 
 from __future__ import annotations
@@ -44,6 +47,19 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
 MINIO_USER = os.getenv("MINIO_ROOT_USER", "minioadmin")
 MINIO_PASS = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
 
+# ---------------------------------------------------------------------------
+# Lotes de categorias: cada entrada define um grupo independente de busca.
+# As categorias dentro de um mesmo lote são combinadas com OR na query.
+# O campo max_results controla quantos artigos serão baixados POR LOTE.
+# ---------------------------------------------------------------------------
+CATEGORY_BATCHES: list[dict] = [
+    {
+        "label": "genomics",
+        "categories": ["q-bio.GN"],
+        "max_results": 10000,
+    },
+]
+
 
 def parse_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
@@ -65,7 +81,7 @@ def normalize_whitespace(value: str | None) -> str:
 
 @dataclass(slots=True)
 class IngestionConfig:
-    api_url: str = os.getenv("DATASET_SOURCE_URL", "https://export.arxiv.org/api/query")
+    api_url: str = os.getenv("DATASET_SOURCE_URL", "https://arxiv.org/api/query")
     categories: list[str] = field(
         default_factory=lambda: parse_categories(os.getenv("ARXIV_CATEGORY", "cs.LG"))
     )
@@ -220,21 +236,51 @@ def fetch_arxiv_page(
     sort_by: str,
     sort_order: str,
 ) -> tuple[list[dict], int | None]:
-    response = client.get(
-        api_url,
-        params={
-            "search_query": search_query,
-            "start": start,
-            "max_results": batch_size,
-            "sortBy": sort_by,
-            "sortOrder": sort_order,
-        },
-    )
-    response.raise_for_status()
-    return parse_arxiv_feed(response.text, search_query)
+    # Algumas categorias menores (ex.: q-bio.*) retornam 0 resultados com
+    # sortBy=submittedDate. Nesse caso fazemos um fallback para "relevance".
+    sort_candidates = [sort_by]
+    if sort_by != "relevance":
+        sort_candidates.append("relevance")
+
+    total: int | None = None
+    for attempt_sort in sort_candidates:
+        response = client.get(
+            api_url,
+            params={
+                "search_query": search_query,
+                "start": start,
+                "max_results": batch_size,
+                "sortBy": attempt_sort,
+                "sortOrder": sort_order,
+            },
+        )
+        response.raise_for_status()
+        records, total = parse_arxiv_feed(response.text, search_query)
+
+        if records:
+            if attempt_sort != sort_by:
+                logger.info(
+                    "Fallback de sortBy='{}' → '{}' funcionou para query '{}'.",
+                    sort_by,
+                    attempt_sort,
+                    search_query,
+                )
+            return records, total
+
+        # 0 registros — loga o XML bruto para diagnóstico
+        logger.warning(
+            "0 registros com sortBy='{}' para query='{}' start={}.\nXML bruto (primeiros 2000 chars):\n{}",
+            attempt_sort,
+            search_query,
+            start,
+            response.text[:2000],
+        )
+
+    return [], total
 
 
 def load_raw_data(config: IngestionConfig | None = None) -> list[dict]:
+    """Baixa artigos para UM grupo de categorias definido em `config`."""
     config = config or IngestionConfig()
     requested_total = min(config.max_results, MAX_API_RESULTS)
     if config.max_results > MAX_API_RESULTS:
@@ -288,6 +334,49 @@ def load_raw_data(config: IngestionConfig | None = None) -> list[dict]:
                 time.sleep(config.delay_seconds)
 
     return records[:requested_total]
+
+
+def load_all_batches(config: IngestionConfig) -> list[dict]:
+    """
+    Executa um download independente para cada lote definido em CATEGORY_BATCHES
+    e retorna todos os registros combinados.
+
+    Cada lote usa as configurações globais (sort_by, sort_order, delay, etc.)
+    mas sobrescreve `categories` e `max_results` conforme definido no lote.
+    """
+    all_records: list[dict] = []
+
+    for batch_def in CATEGORY_BATCHES:
+        label = batch_def["label"]
+        logger.info("--- Iniciando lote '{}' --- ", label)
+
+        batch_config = IngestionConfig(
+            api_url=config.api_url,
+            categories=batch_def["categories"],
+            max_results=batch_def["max_results"],
+            batch_size=config.batch_size,
+            delay_seconds=config.delay_seconds,
+            sort_by=config.sort_by,
+            sort_order=config.sort_order,
+            output_dir=config.output_dir,
+            dataset_name=config.dataset_name,
+            write_to_minio=config.write_to_minio,
+            user_agent=config.user_agent,
+        )
+
+        records = load_raw_data(batch_config)
+        logger.info(
+            "Lote '{}' concluído: {} registros (categorias: {}).",
+            label,
+            len(records),
+            batch_def["categories"],
+        )
+        all_records.extend(records)
+
+    logger.info(
+        "Total combinado de todos os lotes: {} registros.", len(all_records)
+    )
+    return all_records
 
 
 def serialize_records(records: list[dict]) -> bytes:
@@ -381,7 +470,7 @@ def parse_args() -> IngestionConfig:
     )
     parser.add_argument(
         "--api-url",
-        default=os.getenv("DATASET_SOURCE_URL", "https://export.arxiv.org/api/query"),
+        default=os.getenv("DATASET_SOURCE_URL", "https://arxiv.org/api/query"),
         help="Endpoint da API do arXiv.",
     )
     parser.add_argument(
@@ -437,7 +526,11 @@ def parse_args() -> IngestionConfig:
 def run() -> tuple[Path, str | None]:
     logger.info("=== Ingestão Bronze iniciada ===")
     config = parse_args()
-    records = load_raw_data(config)
+
+    # Baixa cs.LG (10 000 artigos) + q-bio.NC (10 000 artigos) separadamente
+    # e combina tudo em um único arquivo JSONL salvo no dataset "arxiv".
+    records = load_all_batches(config)
+
     logger.info("Total de registros carregados: {}", len(records))
     local_path = save_records_locally(records, config)
 

@@ -463,3 +463,26 @@ class PostgresService:
 
     async def update_feedback(self, run_id: str, feedback: int) -> None:
         await asyncio.to_thread(self.update_feedback_sync, run_id, feedback)
+
+    def list_data_files(
+    self,
+    dataset_id: str,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
+        """Retorna todos os arquivos de um dataset, opcionalmente filtrados por status."""
+        dataset_uuid = self._uuid_or_none(dataset_id)
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, dataset_id, layer, bucket, object_key,
+                        row_count, checksum, status
+                    FROM data_files
+                    WHERE dataset_id = :dataset_id
+                    AND (:status IS NULL OR status = :status)
+                    ORDER BY processed_at DESC
+                    """
+                ),
+                {"dataset_id": dataset_uuid, "status": status},
+            ).mappings().all()
+            return [dict(row) for row in rows]

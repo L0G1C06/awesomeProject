@@ -127,6 +127,22 @@ services:
       retries: 3
 
   # ─────────────────────────────────────────
+  # Milvus Visualizer
+  # ─────────────────────────────────────────
+  milvus_viewer:
+    image: zilliz/attu:latest
+    container_name: attu
+    restart: unless-stopped
+    ports:
+      - "8000:3000"
+    environment:
+      MILVUS_URL: rag_milvus:19530
+    depends_on:
+      - milvus
+    networks:
+      - rag_network
+
+  # ─────────────────────────────────────────
   # LLM LOCAL — Ollama
   # ─────────────────────────────────────────
   # ollama:

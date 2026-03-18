@@ -1,5 +1,6 @@
 """
 Pipeline — Embedding & Indexação (Otimizado)
+Pula arquivos já indexados consultando o object_key na tabela data_files.
 """
 
 import json
@@ -32,7 +33,6 @@ EMBED_MODEL = os.getenv(
 
 MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 
-# aumentamos batch
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", 256))
 
 DATASET_NAME = os.getenv("DATASET_NAME", "arxiv")
@@ -59,7 +59,6 @@ def get_minio_client() -> Minio:
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-
     embeddings = model.encode(
         texts,
         batch_size=BATCH_SIZE,
@@ -67,7 +66,6 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
         show_progress_bar=False,
         device="cpu"
     )
-
     return embeddings.tolist()
 
 
@@ -76,18 +74,24 @@ def stream_jsonl(response):
     for chunk in response.stream(32 * 1024):
         buffer += chunk.decode()
         lines = buffer.split("\n")
-        # Last element may be incomplete — keep it in the buffer
         buffer = lines[-1]
         for line in lines[:-1]:
             if line.strip():
                 yield json.loads(line)
-    # Flush any remaining complete line in the buffer
     if buffer.strip():
         yield json.loads(buffer)
 
 
-def run():
+def get_indexed_object_keys(db: PostgresService, dataset_id: int) -> set[str]:
+    """
+    Retorna o conjunto de object_keys já indexados com status='done'
+    para o dataset informado, consultando a tabela data_files no Postgres.
+    """
+    rows = db.list_data_files(dataset_id=dataset_id, status="done")
+    return {row["object_key"] for row in rows}
 
+
+def run():
     logger.info("=== Embedding & Indexação iniciada ===")
 
     mlflow.set_tracking_uri(MLFLOW_URI)
@@ -99,15 +103,6 @@ def run():
         milvus = MilvusService()
         db = PostgresService()
 
-        objects = client.list_objects(
-            BUCKET,
-            prefix="",
-            recursive=True
-        )
-
-        total_indexed = 0
-        total_files = 0
-
         dataset_id = db.ensure_dataset(
             name=DATASET_NAME,
             domain=DATASET_DOMAIN,
@@ -116,31 +111,43 @@ def run():
             description=f"Dataset {DATASET_NAME} indexado no Milvus"
         )
 
+        # Carrega de uma vez os object_keys já indexados para evitar
+        # consulta ao banco a cada arquivo do loop.
+        already_indexed = get_indexed_object_keys(db, dataset_id)
+        logger.info(
+            "{} arquivo(s) já indexado(s) serão ignorados.", len(already_indexed)
+        )
+
+        objects = client.list_objects(BUCKET, prefix="", recursive=True)
+
+        total_indexed = 0
+        total_files = 0
+        total_skipped = 0
+
         for obj in objects:
 
             if not obj.object_name.endswith(".jsonl"):
                 continue
 
+            # Pula arquivos já indexados com sucesso
+            if obj.object_name in already_indexed:
+                logger.info("Pulando (já indexado): {}", obj.object_name)
+                total_skipped += 1
+                continue
+
             logger.info(f"Processando {obj.object_name}")
 
-            response = client.get_object(
-                BUCKET,
-                obj.object_name
-            )
-
+            response = client.get_object(BUCKET, obj.object_name)
             chunks = []
 
             for record in stream_jsonl(response):
-
                 if "content" not in record:
-
                     record["content"] = " ".join([
                         record.get("title", ""),
                         record.get("summary", ""),
                         " ".join(record.get("authors", [])),
                         " ".join(record.get("categories", []))
                     ]).strip()
-
                 chunks.append(record)
 
             response.close()
@@ -181,7 +188,6 @@ def run():
                 )
 
                 for chunk, milvus_id in zip(batch, milvus_ids):
-
                     db.save_document(
                         data_file_id=data_file_id,
                         milvus_id=milvus_id,
@@ -212,7 +218,8 @@ def run():
 
         mlflow.log_metrics({
             "total_files_indexed": total_files,
-            "total_chunks_indexed": total_indexed
+            "total_files_skipped": total_skipped,
+            "total_chunks_indexed": total_indexed,
         })
 
         mlflow.log_params({
@@ -220,7 +227,8 @@ def run():
         })
 
         logger.info(
-            f"=== Indexação concluída: {total_indexed} chunks em {total_files} arquivos ==="
+            "=== Indexação concluída: {} chunks em {} arquivo(s) novo(s), {} ignorado(s) ===",
+            total_indexed, total_files, total_skipped,
         )
 
 
