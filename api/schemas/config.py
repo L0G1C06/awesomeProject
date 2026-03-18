@@ -1,44 +1,46 @@
 """Configurações centrais da aplicação via pydantic-settings."""
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     # MinIO
-    MINIO_ENDPOINT: str = "localhost:9000"
-    MINIO_ROOT_USER: str = "minioadmin"
-    MINIO_ROOT_PASSWORD: str = "minioadmin"
+    MINIO_ENDPOINT: str
+    MINIO_ROOT_USER: str
+    MINIO_ROOT_PASSWORD: str
 
     # PostgreSQL
-    DATABASE_URL: str = "postgresql://raguser:ragpass@localhost:5433/ragdb"
+    DATABASE_URL: str
 
     # Milvus
-    MILVUS_HOST: str = "localhost"
-    MILVUS_PORT: int = 19530
-    MILVUS_COLLECTION: str = "rag_documents"
+    MILVUS_HOST: str
+    MILVUS_PORT: int
+    MILVUS_COLLECTION: str
 
     # Ollama
-    OLLAMA_HOST: str = "http://localhost:11434"
-    OLLAMA_LLM_MODEL: str = "mistral"
-    OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
-    OLLAMA_EMBED_DIMENSION: int = 768
+    OLLAMA_HOST: str
+    OLLAMA_LLM_MODEL: str
+    OLLAMA_EMBED_MODEL: str
+    OLLAMA_EMBED_DIMENSION: int
 
-    # HuggingFace ← adicionado
-    HUGGINGFACE_API_TOKEN: str = ""
-    HF_LLM_MODEL: str = "meta-llama/Meta-Llama-3-8B-Instruct"
-    HF_EMBED_MODEL: str = "BAAI/bge-base-en-v1.5" 
+    # HuggingFace
+    HUGGINGFACE_API_TOKEN: str
+    HF_LLM_MODEL: str
+    HF_EMBED_MODEL: str
 
     # MLflow
-    MLFLOW_TRACKING_URI: str = "http://localhost:5000"
-    MLFLOW_EXPERIMENT_NAME: str = "rag-enterprise"
+    MLFLOW_TRACKING_URI: str
+    MLFLOW_EXPERIMENT_NAME: str
 
     # RAG Pipeline
-    CHUNK_SIZE: int = 512
-    CHUNK_OVERLAP: int = 64
-    TOP_K_RETRIEVAL: int = 5
+    CHUNK_SIZE: int
+    CHUNK_OVERLAP: int
+    TOP_K_RETRIEVAL: int
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        extra="ignore"
+        extra="ignore",
     )
+
 
 settings = Settings()
