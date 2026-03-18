@@ -160,12 +160,12 @@ def query_rag(question: str, top_k_raw) -> tuple[str, str, object]:
 
 
 # ── Layout ─────────────────────────────────────────────────────────────────────
-with gr.Blocks(title="RAG Enterprise", css=CSS) as demo:
+with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
 
     gr.HTML("""
         <div class="rag-header">
-            <h1>RAG Enterprise</h1>
-            <p>Consulta semântica em artigos científicos &nbsp;·&nbsp; HuggingFace &nbsp;·&nbsp; Milvus &nbsp;·&nbsp; MLflow</p>
+            <h1>Buscador de Documentos Científicos</h1>
+            <p>Consulta semântica em artigos científicos</p>
         </div>
     """)
 
@@ -175,7 +175,6 @@ with gr.Blocks(title="RAG Enterprise", css=CSS) as demo:
 
             question_input = gr.Textbox(
                 label="Pergunta",
-                placeholder="Ex: How does self-attention work in transformer models?",
                 lines=4,
                 max_lines=10,
             )
