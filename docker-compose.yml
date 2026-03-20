@@ -192,9 +192,7 @@ services:
   # API — FastAPI
   # ─────────────────────────────────────────
   api:
-    build:
-      context: .
-      dockerfile: api/Dockerfile
+    image: l0g1g06/awesomeproject:api
     container_name: rag_api
     restart: unless-stopped
     ports:
@@ -224,9 +222,7 @@ services:
   # FRONTEND — Gradio
   # ─────────────────────────────────────────
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: l0g1g06/awesomeproject:frontend
     container_name: rag_frontend
     restart: unless-stopped
     ports:
