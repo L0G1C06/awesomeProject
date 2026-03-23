@@ -65,14 +65,20 @@ class RAGService:
                 collection_name=settings.MILVUS_COLLECTION,
             )
             retrieved_docs = [
-                RetrievedDoc(
-                    id=str(h["id"]),
-                    content=h["content"],
-                    score=float(h["score"]),
-                    metadata=h.get("metadata", {}),
-                )
-                for h in hits
-            ]
+            RetrievedDoc(
+                score=float(h["score"]),
+                title=h.get("metadata", {}).get("title"),
+                url=h.get("metadata", {}).get("id"),
+                arxiv_id=h.get("metadata", {}).get("arxiv_id"),
+                authors=h.get("metadata", {}).get("authors"),
+                categories=h.get("metadata", {}).get("categories"),
+                primary_category=h.get("metadata", {}).get("primary_category"),
+                content=h["content"],
+                published=h.get("metadata", {}).get("published"),
+                updated=h.get("metadata", {}).get("updated")
+            )
+            for h in hits
+        ]
 
             # ── 3. Construção do prompt ────────────────────────
             context = "\n\n".join(

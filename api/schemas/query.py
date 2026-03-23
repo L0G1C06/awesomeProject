@@ -1,5 +1,5 @@
 """Schemas de request/response para endpoint de query RAG."""
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -10,10 +10,16 @@ class QueryRequest(BaseModel):
 
 
 class RetrievedDoc(BaseModel):
-    id: str
-    content: str
     score: float
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    title: Optional[str] = None
+    url: Optional[str] = None
+    arxiv_id: Optional[str] = None
+    authors: Optional[str] = None
+    categories: Optional[str] = None
+    primary_category: Optional[str] = None
+    content: str
+    published: Optional[str] = None
+    updated: Optional[str] = None
 
 
 class QueryResponse(BaseModel):
