@@ -13,7 +13,7 @@ API_URL       = os.getenv("API_URL", "http://localhost:8001")
 HF_MODEL      = os.getenv("HF_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
 TOP_K_DEFAULT = int(os.getenv("TOP_K_RETRIEVAL", 5))
 TOP_K_MIN     = 1
-TOP_K_MAX     = 10
+TOP_K_MAX     = 20  # atualizado para refletir o novo limite da API (ge=1, le=20)
 
 # ── CSS ────────────────────────────────────────────────────────────────────────
 CSS = """
@@ -65,6 +65,11 @@ label > span { font-size: 0.75rem !important; font-weight: 500 !important; color
 .model-badge { background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 0.45rem 0.75rem; font-size: 0.76rem; color: #6e7681; margin-top: 0.6rem; }
 .model-badge code { font-family: 'DM Mono', monospace !important; color: #79c0ff !important; font-size: 0.76rem !important; }
 
+/* ── Run meta bar ── */
+.run-meta { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 0.55rem 1rem;
+            font-size: 0.76rem; color: #6e7681; margin-bottom: 1rem; display: flex; gap: 1.25rem; flex-wrap: wrap; }
+.run-meta code { font-family: 'DM Mono', monospace !important; color: #79c0ff !important; font-size: 0.74rem !important; }
+
 /* ── Answer panel ── */
 .answer-panel { background: #161b22 !important; border: 1px solid #21262d !important; border-radius: 10px !important; padding: 1.25rem 1.5rem !important; min-height: 220px; }
 .answer-panel p, .answer-panel li { font-size: 0.91rem !important; line-height: 1.72 !important; color: #c9d1d9 !important; }
@@ -82,6 +87,13 @@ label > span { font-size: 0.75rem !important; font-weight: 500 !important; color
 .docs-content em  { color: #6e7681 !important; }
 .docs-content code { font-family: 'DM Mono', monospace !important; background: #0d1117 !important; padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.82em !important; color: #79c0ff !important; }
 .docs-content hr  { border: none !important; border-top: 1px solid #21262d !important; margin: 1.1rem 0 !important; }
+
+/* ── Tag pills (categories) ── */
+.docs-content .pill {
+    display: inline-block; background: #0d1117; border: 1px solid #30363d;
+    border-radius: 20px; padding: 0.1em 0.55em; font-size: 0.74rem !important;
+    color: #8b949e !important; margin: 0 0.2rem 0.2rem 0; line-height: 1.5;
+}
 """
 
 # ── Validação ──────────────────────────────────────────────────────────────────
@@ -97,10 +109,88 @@ def validate_top_k(value) -> tuple[int, str]:
     return v, ""
 
 
+# ── Helpers ────────────────────────────────────────────────────────────────────
+def _pill(text: str) -> str:
+    """Formata uma string como pill/tag inline."""
+    return f'<span class="pill">{text}</span>'
+
+
+def _format_doc(i: int, doc: dict, total: int) -> str:
+    """Renderiza um RetrievedDoc em Markdown."""
+    score            = doc.get("score", 0)
+    title            = doc.get("title") or f"Documento {i}"
+    authors          = doc.get("authors")
+    published        = doc.get("published")
+    updated          = doc.get("updated")
+    url              = doc.get("url")
+    arxiv_id         = doc.get("arxiv_id")
+    categories       = doc.get("categories")
+    primary_category = doc.get("primary_category")
+    content          = doc.get("content", "")
+
+    lines: list[str] = []
+
+    # ── Título ──
+    if url:
+        lines.append(f"**[{title}]({url})**")
+    else:
+        lines.append(f"**{title}**")
+
+    # ── Linha de metadados principais ──
+    meta_parts = [f"Relevância `{score:.3f}`"]
+    if primary_category:
+        meta_parts.append(f"Categoria primária `{primary_category}`")
+    if published:
+        meta_parts.append(f"Publicado: {published[:10]}")   # só a data, sem hora
+    if updated and updated != published:
+        meta_parts.append(f"Atualizado: {updated[:10]}")
+    lines.append(" &nbsp;·&nbsp; ".join(meta_parts))
+    lines.append("")
+
+    # ── Autores ──
+    if authors:
+        lines.append(f"*{authors}*")
+        lines.append("")
+
+    # ── Categorias como pills ──
+    if categories:
+        cats = [c.strip() for c in categories.split() if c.strip()]
+        if cats:
+            pills = " ".join(_pill(c) for c in cats)
+            lines.append(pills)
+            lines.append("")
+
+    # ── IDs / links extras ──
+    ids: list[str] = []
+    if arxiv_id:
+        ids.append(f"arXiv: `{arxiv_id}`")
+    if ids:
+        lines.append(" &nbsp;·&nbsp; ".join(ids))
+        lines.append("")
+
+    # ── Trecho do conteúdo ──
+    lines.append(content)
+
+    if i < total:
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 # ── Query ──────────────────────────────────────────────────────────────────────
-def query_rag(question: str, top_k_raw) -> tuple[str, str, object]:
+def query_rag(question: str, top_k_raw) -> tuple[str, str, str, object]:
+    """Retorna: (answer_md, run_meta_html, docs_md, accordion_state)."""
+    empty_meta = ""
+
     if not question.strip():
-        return "⚠ Digite uma pergunta antes de consultar.", "", gr.Accordion(open=False)
+        return (
+            "⚠ Digite uma pergunta antes de consultar.",
+            empty_meta,
+            "",
+            gr.Accordion(open=False),
+        )
 
     top_k, _ = validate_top_k(top_k_raw)
 
@@ -113,50 +203,46 @@ def query_rag(question: str, top_k_raw) -> tuple[str, str, object]:
             response.raise_for_status()
             data = response.json()
 
-        answer  = data.get("answer", "")
-        latency = data.get("latency_ms", 0)
-        model   = data.get("llm_model", HF_MODEL)
-        docs    = data.get("retrieved_docs", [])
+        # ── Campos de QueryResponse ──
+        answer       = data.get("answer", "")          # mantido por compatibilidade futura
+        latency      = data.get("latency_ms", 0)
+        model        = data.get("llm_model", HF_MODEL)
+        docs         = data.get("retrieved_docs", [])
+        run_id       = data.get("run_id", "")
+        mlflow_run   = data.get("mlflow_run_id")
 
         n = len(docs)
-        docs_md = (
-            f"**{n} documento{'s' if n != 1 else ''} recuperado{'s' if n != 1 else ''}**"
-            f" &nbsp;·&nbsp; `{model}`"
-            f" &nbsp;·&nbsp; {latency} ms\n\n"
-        )
 
-        for i, doc in enumerate(docs, 1):
-            score    = doc.get("score", 0)
-            metadata = doc.get("metadata", {})
-            title    = (
-                metadata.get("title")
-                or metadata.get("source")
-                or metadata.get("filename")
-                or f"Documento {i}"
-            )
+        # ── Barra de metadados da run ──
+        meta_parts = [
+            f"<span><strong>Modelo</strong> &nbsp;<code>{model}</code></span>",
+            f"<span><strong>Latência</strong> &nbsp;<code>{latency} ms</code></span>",
+            f"<span><strong>Docs recuperados</strong> &nbsp;<code>{n}</code></span>",
+        ]
+        if run_id:
+            meta_parts.append(f"<span><strong>Run ID</strong> &nbsp;<code>{run_id}</code></span>")
+        if mlflow_run:
+            meta_parts.append(f"<span><strong>MLflow</strong> &nbsp;<code>{mlflow_run}</code></span>")
 
-            docs_md += f"**{title}**\n\n"
+        run_meta_html = '<div class="run-meta">' + "".join(meta_parts) + "</div>"
 
-            meta_parts = [f"Relevância `{score:.3f}`"]
-            if metadata.get("authors"):
-                meta_parts.append(f"Autores: {metadata['authors']}")
-            if metadata.get("year") or metadata.get("date"):
-                meta_parts.append(str(metadata.get("year") or metadata.get("date")))
-            docs_md += " &nbsp;·&nbsp; ".join(meta_parts) + "\n\n"
+        # ── Documentos ──
+        docs_md = "\n".join(_format_doc(i, doc, n) for i, doc in enumerate(docs, 1))
 
-            docs_md += f"{doc.get('content', '')}\n\n"
-            if i < n:
-                docs_md += "---\n\n"
-
-        return answer, docs_md, gr.Accordion(open=True)
+        return answer, run_meta_html, docs_md, gr.Accordion(open=True)
 
     except httpx.ConnectError:
         msg = "❌ Não foi possível conectar à API. Verifique se o backend está rodando."
-        return msg, "", gr.Accordion(open=False)
+        return msg, empty_meta, "", gr.Accordion(open=False)
     except httpx.HTTPStatusError as e:
-        return f"❌ Erro HTTP {e.response.status_code}: {e.response.text}", "", gr.Accordion(open=False)
+        return (
+            f"❌ Erro HTTP {e.response.status_code}: {e.response.text}",
+            empty_meta,
+            "",
+            gr.Accordion(open=False),
+        )
     except Exception as e:
-        return f"❌ Erro inesperado: {str(e)}", "", gr.Accordion(open=False)
+        return f"❌ Erro inesperado: {str(e)}", empty_meta, "", gr.Accordion(open=False)
 
 
 # ── Layout ─────────────────────────────────────────────────────────────────────
@@ -192,6 +278,9 @@ with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
             submit_btn = gr.Button("Consultar", variant="primary", elem_classes=["submit-btn"])
 
         with gr.Column(scale=3):
+            # Barra de metadados da run (run_id, mlflow_run_id, latência, modelo, n_docs)
+            run_meta_output = gr.HTML(value="")
+
             answer_output = gr.Markdown(
                 value="",
                 label="Resposta",
@@ -203,7 +292,6 @@ with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
 
     # ── Validação ao editar top-k ──────────────────────────────────────────────
     def on_top_k_blur(value):
-        """Valida apenas ao sair do campo. Campo vazio não dispara erro."""
         if value is None or str(value).strip() == "":
             return TOP_K_DEFAULT, ""
         corrected, msg = validate_top_k(value)
@@ -220,7 +308,7 @@ with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
         trigger(
             fn=query_rag,
             inputs=[question_input, top_k_input],
-            outputs=[answer_output, docs_output, docs_accordion],
+            outputs=[answer_output, run_meta_output, docs_output, docs_accordion],
         )
 
 
