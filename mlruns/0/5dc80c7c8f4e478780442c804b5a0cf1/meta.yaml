@@ -1,0 +1,15 @@
+artifact_uri: file:///home/weber/projects/Facens/IA/awesomeProject/mlruns/0/5dc80c7c8f4e478780442c804b5a0cf1/artifacts
+end_time: 1774399719425
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 5dc80c7c8f4e478780442c804b5a0cf1
+run_name: upset-hawk-912
+run_uuid: 5dc80c7c8f4e478780442c804b5a0cf1
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1774399284037
+status: 4
+tags: []
+user_id: weber

@@ -1,0 +1,15 @@
+artifact_uri: file:///home/weber/projects/Facens/IA/awesomeProject/mlruns/0/662acc27670d40f9b86b751cdabe01ef/artifacts
+end_time: 1774441541642
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 662acc27670d40f9b86b751cdabe01ef
+run_name: worried-gull-36
+run_uuid: 662acc27670d40f9b86b751cdabe01ef
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1774441328802
+status: 4
+tags: []
+user_id: weber
