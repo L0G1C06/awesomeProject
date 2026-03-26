@@ -1,18 +1,21 @@
 """
 Serviço RAG: orquestra embedding, retrieval e geração.
 """
+import json
+import tempfile
 import time
 import uuid
-from coverage import context
+
 from loguru import logger
 
 # ── Must set BEFORE importing mlflow ──────────────────────────
 import os
 os.environ["MLFLOW_S3_ENDPOINT_URL"] = "http://localhost:9000"
-os.environ["AWS_ACCESS_KEY_ID"] = "minioadmin"
-os.environ["AWS_SECRET_ACCESS_KEY"] = "minioadmin"
+os.environ["AWS_ACCESS_KEY_ID"]      = "minioadmin"
+os.environ["AWS_SECRET_ACCESS_KEY"]  = "minioadmin"
+os.environ["MLFLOW_TRACKING_URI"]    = "http://localhost:5000"  # ← essa linha era o que faltava
 
-import mlflow  # ← now mlflow sees the env vars on first import
+import mlflow
 
 from api.schemas.query import QueryResponse, RetrievedDoc
 from api.services.milvus_service import MilvusService
@@ -35,6 +38,57 @@ STRICT RULES:
 If the documents lack sufficient information to address the query, respond only with:
 "The retrieved documents do not contain enough information to answer this question."
 """
+
+
+def _log_docs_table(docs: list[RetrievedDoc], tag: str) -> None:
+    """Loga documentos como tabela e JSON completo no MLflow."""
+
+    # Tabela resumida (aparece em Artifacts como JSON navegável)
+    rows = [
+        {
+            "rank": i + 1,
+            "score": round(doc.score, 4),
+            "title": doc.title or "",
+            "arxiv_id": doc.arxiv_id or "",
+            "authors": doc.authors or "",
+            "primary_category": doc.primary_category or "",
+            "published": str(doc.published or ""),
+            "content_preview": (doc.content or "")[:200],
+        }
+        for i, doc in enumerate(docs)
+    ]
+
+    mlflow.log_table(
+        data={
+            "columns": list(rows[0].keys()),
+            "data": [list(r.values()) for r in rows],
+        },
+        artifact_file=f"docs_{tag}.json",
+    )
+
+    # JSON completo com conteúdo inteiro
+    full_rows = [
+        {
+            "rank": i + 1,
+            "score": round(doc.score, 4),
+            "title": doc.title,
+            "arxiv_id": doc.arxiv_id,
+            "authors": doc.authors,
+            "categories": doc.categories,
+            "primary_category": doc.primary_category,
+            "published": str(doc.published),
+            "updated": str(doc.updated),
+            "url": doc.url,
+            "content": doc.content,
+        }
+        for i, doc in enumerate(docs)
+    ]
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as f:
+        json.dump(full_rows, f, ensure_ascii=False, indent=2)
+        tmp_path = f.name
+
+    mlflow.log_artifact(tmp_path, artifact_path=f"docs_{tag}_full")
 
 
 class RAGService:
@@ -60,7 +114,7 @@ class RAGService:
                 "top_k_after_rerank": 3,
                 "llm_model": llm_model,
                 "embed_model": settings.HF_EMBED_MODEL,
-                "reranker_used": True
+                "reranker_used": True,
             })
 
             # ── 1. EMBEDDING ───────────────────────────────
@@ -86,20 +140,26 @@ class RAGService:
                     primary_category=h.get("metadata", {}).get("primary_category"),
                     content=h["content"],
                     published=h.get("metadata", {}).get("published"),
-                    updated=h.get("metadata", {}).get("updated")
+                    updated=h.get("metadata", {}).get("updated"),
                 )
                 for h in hits
             ]
+
+            # Loga documentos ANTES do rerank
+            mlflow.log_metric("docs_before_rerank", len(retrieved_docs))
+            _log_docs_table(retrieved_docs, tag="before_rerank")
 
             # ── 3. RE-RANKER 🔥 ─────────────────────────────
             logger.info("Aplicando re-ranking...")
             retrieved_docs = self.reranker.rerank(
                 query=query,
                 docs=retrieved_docs,
-                top_k=3
+                top_k=3,
             )
 
+            # Loga documentos DEPOIS do rerank
             mlflow.log_metric("docs_after_rerank", len(retrieved_docs))
+            _log_docs_table(retrieved_docs, tag="after_rerank")
 
             # ── 4. PROMPT ──────────────────────────────────
             context = "\n\n".join(
@@ -119,7 +179,6 @@ class RAGService:
 
             # ── 6. MÉTRICAS ────────────────────────────────
             latency_ms = int((time.time() - start) * 1000)
-
             prompt_tokens = len(prompt.split())
             response_tokens = len(answer.split())
 
