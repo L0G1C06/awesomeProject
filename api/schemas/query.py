@@ -1,0 +1,30 @@
+"""Schemas de request/response para endpoint de query RAG."""
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
+
+
+class QueryRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class RetrievedDoc(BaseModel):
+    score: float
+    title: Optional[str] = None
+    url: Optional[str] = None
+    arxiv_id: Optional[str] = None
+    authors: Optional[str] = None
+    categories: Optional[str] = None
+    primary_category: Optional[str] = None
+    content: str
+    published: Optional[str] = None
+    updated: Optional[str] = None
+
+
+class QueryResponse(BaseModel):
+    run_id: str
+    retrieved_docs: list[RetrievedDoc] = Field(default_factory=list)
+    llm_model: str
+    latency_ms: int
+    mlflow_run_id: str | None = None

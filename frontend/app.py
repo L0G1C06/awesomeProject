@@ -5,115 +5,311 @@ Interface de consulta RAG com visualização de documentos recuperados.
 import os
 import httpx
 import gradio as gr
+from dotenv import load_dotenv
 
-API_URL = os.getenv("API_URL", "http://api:8000")
+load_dotenv()
+
+API_URL       = os.getenv("API_URL", "http://localhost:8001")
+HF_MODEL      = os.getenv("HF_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
+TOP_K_DEFAULT = int(os.getenv("TOP_K_RETRIEVAL", 5))
+TOP_K_MIN     = 1
+TOP_K_MAX     = 20  # atualizado para refletir o novo limite da API (ge=1, le=20)
+
+# ── CSS ────────────────────────────────────────────────────────────────────────
+CSS = """
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; }
+body, .gradio-container { font-family: 'DM Sans', sans-serif !important; background: #0d1117 !important; color: #c9d1d9 !important; }
+
+/* ── Header ── */
+.rag-header { padding: 2rem 0 1.5rem; border-bottom: 1px solid #21262d; margin-bottom: 1.75rem; }
+.rag-header h1 { margin: 0 !important; font-size: 1.45rem !important; font-weight: 600 !important; color: #f0f6fc !important; letter-spacing: -0.025em; }
+.rag-header p  { margin: 0.3rem 0 0 !important; font-size: 0.82rem !important; color: #6e7681 !important; }
+
+/* ── Labels ── */
+label > span { font-size: 0.75rem !important; font-weight: 500 !important; color: #8b949e !important; text-transform: uppercase !important; letter-spacing: 0.07em !important; }
+
+/* ── Textbox ── */
+.gr-textbox textarea, .gr-textbox input {
+    background: #161b22 !important; border: 1px solid #30363d !important; border-radius: 8px !important;
+    color: #c9d1d9 !important; font-size: 0.9rem !important; padding: 0.7rem 0.9rem !important;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.gr-textbox textarea:focus, .gr-textbox input:focus {
+    border-color: #388bfd !important; outline: none !important;
+    box-shadow: 0 0 0 3px rgba(56,139,253,.15) !important;
+}
+
+/* ── Number input ── */
+.top-k-wrap input[type=number] {
+    background: #161b22 !important; border: 1px solid #30363d !important; border-radius: 8px !important;
+    color: #c9d1d9 !important; font-size: 0.9rem !important; padding: 0.7rem 0.9rem !important; width: 100% !important;
+    transition: border-color 0.15s;
+}
+.top-k-wrap input[type=number]:focus { border-color: #388bfd !important; outline: none !important; }
+.validation-error { font-size: 0.76rem !important; color: #f85149 !important; min-height: 1rem; margin-top: 0.2rem; }
+
+/* ── Submit button ── */
+.submit-btn > button {
+    background: #238636 !important; border: 1px solid #2ea043 !important; border-radius: 8px !important;
+    color: #fff !important; font-size: 0.88rem !important; font-weight: 500 !important;
+    padding: 0.7rem 1.25rem !important; width: 100% !important; cursor: pointer !important;
+    transition: background 0.15s, transform 0.1s !important;
+}
+.submit-btn > button:hover   { background: #2ea043 !important; }
+.submit-btn > button:active  { transform: scale(0.985) !important; }
+.submit-btn > button:disabled { background: #161b22 !important; color: #484f58 !important; border-color: #21262d !important; cursor: not-allowed !important; }
+
+/* ── Model badge ── */
+.model-badge { background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 0.45rem 0.75rem; font-size: 0.76rem; color: #6e7681; margin-top: 0.6rem; }
+.model-badge code { font-family: 'DM Mono', monospace !important; color: #79c0ff !important; font-size: 0.76rem !important; }
+
+/* ── Run meta bar ── */
+.run-meta { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 0.55rem 1rem;
+            font-size: 0.76rem; color: #6e7681; margin-bottom: 1rem; display: flex; gap: 1.25rem; flex-wrap: wrap; }
+.run-meta code { font-family: 'DM Mono', monospace !important; color: #79c0ff !important; font-size: 0.74rem !important; }
+
+/* ── Answer panel ── */
+.answer-panel { background: #161b22 !important; border: 1px solid #21262d !important; border-radius: 10px !important; padding: 1.25rem 1.5rem !important; min-height: 220px; }
+.answer-panel p, .answer-panel li { font-size: 0.91rem !important; line-height: 1.72 !important; color: #c9d1d9 !important; }
+.answer-panel strong { color: #f0f6fc !important; }
+.answer-panel code   { font-family: 'DM Mono', monospace !important; background: #0d1117; padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.83em !important; color: #79c0ff !important; }
+
+/* ── Accordion ── */
+.gr-accordion { background: #161b22 !important; border: 1px solid #21262d !important; border-radius: 10px !important; margin-top: 1.25rem !important; overflow: hidden; }
+.gr-accordion .label-wrap { padding: 0.85rem 1.25rem !important; }
+.gr-accordion .label-wrap span { font-size: 0.82rem !important; font-weight: 500 !important; color: #8b949e !important; text-transform: uppercase !important; letter-spacing: 0.07em !important; }
+
+/* ── Docs content ── */
+.docs-content p, .docs-content li { font-size: 0.87rem !important; line-height: 1.68 !important; color: #8b949e !important; }
+.docs-content strong { color: #c9d1d9 !important; font-weight: 600 !important; font-size: 0.89rem !important; }
+.docs-content em  { color: #6e7681 !important; }
+.docs-content code { font-family: 'DM Mono', monospace !important; background: #0d1117 !important; padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.82em !important; color: #79c0ff !important; }
+.docs-content hr  { border: none !important; border-top: 1px solid #21262d !important; margin: 1.1rem 0 !important; }
+
+/* ── Tag pills (categories) ── */
+.docs-content .pill {
+    display: inline-block; background: #0d1117; border: 1px solid #30363d;
+    border-radius: 20px; padding: 0.1em 0.55em; font-size: 0.74rem !important;
+    color: #8b949e !important; margin: 0 0.2rem 0.2rem 0; line-height: 1.5;
+}
+"""
+
+# ── Validação ──────────────────────────────────────────────────────────────────
+def validate_top_k(value) -> tuple[int, str]:
+    try:
+        v = int(value)
+    except (ValueError, TypeError):
+        return TOP_K_DEFAULT, f"Valor inválido — usando padrão ({TOP_K_DEFAULT})"
+    if v < TOP_K_MIN:
+        return TOP_K_MIN, f"Mínimo permitido é {TOP_K_MIN}"
+    if v > TOP_K_MAX:
+        return TOP_K_MAX, f"Máximo permitido é {TOP_K_MAX}"
+    return v, ""
 
 
-def query_rag(question: str, top_k: int, model: str) -> tuple[str, str]:
-    """Envia query para a API RAG e retorna resposta + contexto."""
+# ── Helpers ────────────────────────────────────────────────────────────────────
+def _pill(text: str) -> str:
+    """Formata uma string como pill/tag inline."""
+    return f'<span class="pill">{text}</span>'
+
+
+def _format_doc(i: int, doc: dict, total: int) -> str:
+    """Renderiza um RetrievedDoc em Markdown."""
+    score            = doc.get("score", 0)
+    title            = doc.get("title") or f"Documento {i}"
+    authors          = doc.get("authors")
+    published        = doc.get("published")
+    updated          = doc.get("updated")
+    url              = doc.get("url")
+    arxiv_id         = doc.get("arxiv_id")
+    categories       = doc.get("categories")
+    primary_category = doc.get("primary_category")
+    content          = doc.get("content", "")
+
+    lines: list[str] = []
+
+    # ── Título ──
+    if url:
+        lines.append(f"**[{title}]({url})**")
+    else:
+        lines.append(f"**{title}**")
+
+    # ── Linha de metadados principais ──
+    meta_parts = [f"Relevância `{score:.3f}`"]
+    if primary_category:
+        meta_parts.append(f"Categoria primária `{primary_category}`")
+    if published:
+        meta_parts.append(f"Publicado: {published[:10]}")   # só a data, sem hora
+    if updated and updated != published:
+        meta_parts.append(f"Atualizado: {updated[:10]}")
+    lines.append(" &nbsp;·&nbsp; ".join(meta_parts))
+    lines.append("")
+
+    # ── Autores ──
+    if authors:
+        lines.append(f"*{authors}*")
+        lines.append("")
+
+    # ── Categorias como pills ──
+    if categories:
+        cats = [c.strip() for c in categories.split() if c.strip()]
+        if cats:
+            pills = " ".join(_pill(c) for c in cats)
+            lines.append(pills)
+            lines.append("")
+
+    # ── IDs / links extras ──
+    ids: list[str] = []
+    if arxiv_id:
+        ids.append(f"arXiv: `{arxiv_id}`")
+    if ids:
+        lines.append(" &nbsp;·&nbsp; ".join(ids))
+        lines.append("")
+
+    # ── Trecho do conteúdo ──
+    lines.append(content)
+
+    if i < total:
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ── Query ──────────────────────────────────────────────────────────────────────
+def query_rag(question: str, top_k_raw) -> tuple[str, str, str, object]:
+    """Retorna: (answer_md, run_meta_html, docs_md, accordion_state)."""
+    empty_meta = ""
+
     if not question.strip():
-        return "Por favor, digite uma pergunta.", ""
+        return (
+            "⚠ Digite uma pergunta antes de consultar.",
+            empty_meta,
+            "",
+            gr.Accordion(open=False),
+        )
+
+    top_k, _ = validate_top_k(top_k_raw)
 
     try:
         with httpx.Client(timeout=120.0) as client:
             response = client.post(
                 f"{API_URL}/query/",
-                json={"query": question, "top_k": int(top_k), "llm_model": model},
+                json={"query": question, "top_k": top_k},
             )
             response.raise_for_status()
             data = response.json()
 
-        answer = data["answer"]
-        latency = data.get("latency_ms", 0)
+        # ── Campos de QueryResponse ──
+        answer       = data.get("answer", "")          # mantido por compatibilidade futura
+        latency      = data.get("latency_ms", 0)
+        model        = data.get("llm_model", HF_MODEL)
+        docs         = data.get("retrieved_docs", [])
+        run_id       = data.get("run_id", "")
+        mlflow_run   = data.get("mlflow_run_id")
 
-        # Formata os documentos recuperados
-        docs_text = f"**{len(data['retrieved_docs'])} documentos recuperados** | Latência: {latency}ms\n\n"
-        for i, doc in enumerate(data["retrieved_docs"], 1):
-            score = doc.get("score", 0)
-            docs_text += f"### 📄 Documento {i} (score: {score:.3f})\n"
-            docs_text += f"{doc['content']}\n\n"
-            if doc.get("metadata"):
-                docs_text += f"*Metadados: {doc['metadata']}*\n\n"
-            docs_text += "---\n"
+        n = len(docs)
 
-        return answer, docs_text
+        # ── Barra de metadados da run ──
+        meta_parts = [
+            f"<span><strong>Modelo</strong> &nbsp;<code>{model}</code></span>",
+            f"<span><strong>Latência</strong> &nbsp;<code>{latency} ms</code></span>",
+            f"<span><strong>Docs recuperados</strong> &nbsp;<code>{n}</code></span>",
+        ]
+        if run_id:
+            meta_parts.append(f"<span><strong>Run ID</strong> &nbsp;<code>{run_id}</code></span>")
+        if mlflow_run:
+            meta_parts.append(f"<span><strong>MLflow</strong> &nbsp;<code>{mlflow_run}</code></span>")
+
+        run_meta_html = '<div class="run-meta">' + "".join(meta_parts) + "</div>"
+
+        # ── Documentos ──
+        docs_md = "\n".join(_format_doc(i, doc, n) for i, doc in enumerate(docs, 1))
+
+        return answer, run_meta_html, docs_md, gr.Accordion(open=True)
 
     except httpx.ConnectError:
-        return "❌ Erro: Não foi possível conectar à API. Verifique se está rodando.", ""
+        msg = "❌ Não foi possível conectar à API. Verifique se o backend está rodando."
+        return msg, empty_meta, "", gr.Accordion(open=False)
+    except httpx.HTTPStatusError as e:
+        return (
+            f"❌ Erro HTTP {e.response.status_code}: {e.response.text}",
+            empty_meta,
+            "",
+            gr.Accordion(open=False),
+        )
     except Exception as e:
-        return f"❌ Erro: {str(e)}", ""
+        return f"❌ Erro inesperado: {str(e)}", empty_meta, "", gr.Accordion(open=False)
 
 
-def submit_feedback(run_id: str, feedback: int):
-    """Envia feedback para a API."""
-    if not run_id:
-        return "Faça uma consulta primeiro."
-    try:
-        with httpx.Client() as client:
-            client.post(f"{API_URL}/query/feedback", params={"run_id": run_id, "feedback": feedback})
-        labels = {1: "👍 Positivo", -1: "👎 Negativo", 0: "😐 Neutro"}
-        return f"Feedback registrado: {labels.get(feedback, str(feedback))}"
-    except Exception as e:
-        return f"Erro ao registrar feedback: {e}"
+# ── Layout ─────────────────────────────────────────────────────────────────────
+with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
 
+    gr.HTML("""
+        <div class="rag-header">
+            <h1>Buscador de Documentos Científicos</h1>
+            <p>Consulta semântica em artigos científicos</p>
+        </div>
+    """)
 
-# ── Layout Gradio ───────────────────────────────────────────────
-with gr.Blocks(
-    theme=gr.themes.Soft(),
-    title="RAG Enterprise",
-) as demo:
-    gr.Markdown(
-        """
-        # 🔍 RAG Enterprise Platform
-        ### Consulte documentos com IA local (Ollama + Milvus)
-        """
-    )
+    with gr.Row(equal_height=False):
 
-    with gr.Row():
-        with gr.Column(scale=2):
+        with gr.Column(scale=2, min_width=300):
+
             question_input = gr.Textbox(
-                label="Sua pergunta",
-                placeholder="Ex: Quais são os padrões mais comuns encontrados nos dados?",
-                lines=3,
+                label="Pergunta",
+                lines=4,
+                max_lines=10,
             )
-            with gr.Row():
-                top_k_slider = gr.Slider(1, 20, value=5, step=1, label="Documentos a recuperar (top-k)")
-                model_select = gr.Dropdown(
-                    choices=["llama3.2", "llama3.1", "mistral", "phi3"],
-                    value="llama3.2",
-                    label="Modelo LLM",
-                )
-            submit_btn = gr.Button("🔍 Consultar", variant="primary", size="lg")
+
+            top_k_input = gr.Number(
+                label=f"Documentos a recuperar  (mín. {TOP_K_MIN} · máx. {TOP_K_MAX})",
+                value=TOP_K_DEFAULT,
+                precision=0,
+                elem_classes=["top-k-wrap"],
+            )
+            validation_msg = gr.Markdown(value="", elem_classes=["validation-error"])
+
+            gr.HTML(f'<div class="model-badge">Modelo ativo &nbsp;·&nbsp; <code>{HF_MODEL}</code></div>')
+
+            submit_btn = gr.Button("Consultar", variant="primary", elem_classes=["submit-btn"])
 
         with gr.Column(scale=3):
-            answer_output = gr.Markdown(label="Resposta gerada")
+            # Barra de metadados da run (run_id, mlflow_run_id, latência, modelo, n_docs)
+            run_meta_output = gr.HTML(value="")
 
-    with gr.Accordion("📚 Documentos Recuperados", open=False):
-        docs_output = gr.Markdown()
+            answer_output = gr.Markdown(
+                value="",
+                label="Resposta",
+                elem_classes=["answer-panel"],
+            )
 
-    gr.Markdown("---")
-    with gr.Row():
-        gr.Markdown("**Avalie esta resposta:**")
-        feedback_positive = gr.Button("👍")
-        feedback_neutral  = gr.Button("😐")
-        feedback_negative = gr.Button("👎")
-        feedback_status   = gr.Textbox(label="", interactive=False, max_lines=1)
+    with gr.Accordion("Documentos recuperados", open=False) as docs_accordion:
+        docs_output = gr.Markdown(value="", elem_classes=["docs-content"])
 
-    run_id_state = gr.State("")
+    # ── Validação ao editar top-k ──────────────────────────────────────────────
+    def on_top_k_blur(value):
+        if value is None or str(value).strip() == "":
+            return TOP_K_DEFAULT, ""
+        corrected, msg = validate_top_k(value)
+        return corrected, msg
 
-    def handle_query(q, k, m):
-        answer, docs = query_rag(q, k, m)
-        return answer, docs
-
-    submit_btn.click(
-        fn=handle_query,
-        inputs=[question_input, top_k_slider, model_select],
-        outputs=[answer_output, docs_output],
+    top_k_input.blur(
+        fn=on_top_k_blur,
+        inputs=[top_k_input],
+        outputs=[top_k_input, validation_msg],
     )
 
-    feedback_positive.click(fn=lambda rid: submit_feedback(rid, 1),  inputs=[run_id_state], outputs=[feedback_status])
-    feedback_neutral.click(fn=lambda rid: submit_feedback(rid, 0),   inputs=[run_id_state], outputs=[feedback_status])
-    feedback_negative.click(fn=lambda rid: submit_feedback(rid, -1), inputs=[run_id_state], outputs=[feedback_status])
+    # ── Submit (botão e Enter) ─────────────────────────────────────────────────
+    for trigger in (submit_btn.click, question_input.submit):
+        trigger(
+            fn=query_rag,
+            inputs=[question_input, top_k_input],
+            outputs=[answer_output, run_meta_output, docs_output, docs_accordion],
+        )
 
 
 if __name__ == "__main__":
