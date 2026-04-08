@@ -19,6 +19,7 @@ import mlflow
 
 from api.schemas.query import QueryResponse, RetrievedDoc
 from api.services.milvus_service import MilvusService
+from api.services.openai_service import OpenAIService
 from api.services.postgres_service import PostgresService
 from api.services.rag_huggingface_service import HuggingFaceService
 from api.services.reranker_service import RerankerService
@@ -38,6 +39,17 @@ STRICT RULES:
 If the documents lack sufficient information to address the query, respond only with:
 "The retrieved documents do not contain enough information to answer this question."
 """
+
+
+def _normalize_text_metadata(value):
+    """Converte listas/tuplas em texto estável para resposta e logs."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple, set)):
+        return ", ".join(str(item) for item in value if item is not None) or None
+    return str(value)
 
 
 def _log_docs_table(docs: list[RetrievedDoc], tag: str) -> None:
@@ -97,9 +109,23 @@ class RAGService:
         self.db = PostgresService()
         self.hf = HuggingFaceService()
         self.reranker = RerankerService()
+        self.llm = self._build_llm_service()
+
+    def _build_llm_service(self):
+        provider = settings.LLM_PROVIDER.strip().lower()
+
+        if provider == "huggingface":
+            return self.hf
+        if provider == "openai":
+            return OpenAIService()
+
+        raise ValueError(
+            "LLM_PROVIDER inválido. Use 'huggingface' ou 'openai'."
+        )
 
     async def query(self, query: str, top_k: int = 8) -> QueryResponse:
-        llm_model = settings.HF_LLM_MODEL
+        llm_model = self.llm.model_name
+        llm_provider = self.llm.provider_name
         run_id = str(uuid.uuid4())
         start = time.time()
 
@@ -112,6 +138,7 @@ class RAGService:
                 "query": query[:200],
                 "top_k_before_rerank": top_k,
                 "top_k_after_rerank": 3,
+                "llm_provider": llm_provider,
                 "llm_model": llm_model,
                 "embed_model": settings.HF_EMBED_MODEL,
                 "reranker_used": True,
@@ -135,12 +162,22 @@ class RAGService:
                     title=h.get("metadata", {}).get("title"),
                     url=h.get("metadata", {}).get("id"),
                     arxiv_id=h.get("metadata", {}).get("arxiv_id"),
-                    authors=h.get("metadata", {}).get("authors"),
-                    categories=h.get("metadata", {}).get("categories"),
-                    primary_category=h.get("metadata", {}).get("primary_category"),
+                    authors=_normalize_text_metadata(
+                        h.get("metadata", {}).get("authors")
+                    ),
+                    categories=_normalize_text_metadata(
+                        h.get("metadata", {}).get("categories")
+                    ),
+                    primary_category=_normalize_text_metadata(
+                        h.get("metadata", {}).get("primary_category")
+                    ),
                     content=h["content"],
-                    published=h.get("metadata", {}).get("published"),
-                    updated=h.get("metadata", {}).get("updated"),
+                    published=_normalize_text_metadata(
+                        h.get("metadata", {}).get("published")
+                    ),
+                    updated=_normalize_text_metadata(
+                        h.get("metadata", {}).get("updated")
+                    ),
                 )
                 for h in hits
             ]
@@ -170,8 +207,8 @@ class RAGService:
             prompt = self._build_prompt(query=query, context=context)
 
             # ── 5. LLM ─────────────────────────────────────
-            logger.info(f"Gerando resposta com {llm_model}...")
-            answer = self.hf.generate(
+            logger.info(f"Gerando resposta com {llm_provider}:{llm_model}...")
+            answer = self.llm.generate(
                 prompt=prompt,
                 system=SYSTEM_PROMPT,
                 max_tokens=768,
@@ -211,6 +248,7 @@ class RAGService:
             query=query,
             answer=answer,
             retrieved_docs=retrieved_docs,
+            llm_provider=llm_provider,
             llm_model=llm_model,
             latency_ms=latency_ms,
             mlflow_run_id=run.info.run_id,

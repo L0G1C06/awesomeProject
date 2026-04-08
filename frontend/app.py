@@ -11,6 +11,10 @@ load_dotenv()
 
 API_URL       = os.getenv("API_URL", "http://localhost:8001")
 HF_MODEL      = os.getenv("HF_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
+LLM_PROVIDER  = os.getenv("LLM_PROVIDER", "huggingface").lower()
+OPENAI_MODEL  = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+ACTIVE_MODEL  = OPENAI_MODEL if LLM_PROVIDER == "openai" else HF_MODEL
+GRADIO_PORT   = int(os.getenv("GRADIO_SERVER_PORT", "7860"))
 TOP_K_DEFAULT = int(os.getenv("TOP_K_RETRIEVAL", 5))
 TOP_K_MIN     = 1
 TOP_K_MAX     = 20  # atualizado para refletir o novo limite da API (ge=1, le=20)
@@ -206,7 +210,8 @@ def query_rag(question: str, top_k_raw) -> tuple[str, str, str, object]:
         # ── Campos de QueryResponse ──
         answer       = data.get("answer", "")          # mantido por compatibilidade futura
         latency      = data.get("latency_ms", 0)
-        model        = data.get("llm_model", HF_MODEL)
+        provider     = data.get("llm_provider", LLM_PROVIDER)
+        model        = data.get("llm_model", ACTIVE_MODEL)
         docs         = data.get("retrieved_docs", [])
         run_id       = data.get("run_id", "")
         mlflow_run   = data.get("mlflow_run_id")
@@ -215,6 +220,7 @@ def query_rag(question: str, top_k_raw) -> tuple[str, str, str, object]:
 
         # ── Barra de metadados da run ──
         meta_parts = [
+            f"<span><strong>Provider</strong> &nbsp;<code>{provider}</code></span>",
             f"<span><strong>Modelo</strong> &nbsp;<code>{model}</code></span>",
             f"<span><strong>Latência</strong> &nbsp;<code>{latency} ms</code></span>",
             f"<span><strong>Docs recuperados</strong> &nbsp;<code>{n}</code></span>",
@@ -246,7 +252,7 @@ def query_rag(question: str, top_k_raw) -> tuple[str, str, str, object]:
 
 
 # ── Layout ─────────────────────────────────────────────────────────────────────
-with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
+with gr.Blocks(title="Buscador de Documentos Científicos") as demo:
 
     gr.HTML("""
         <div class="rag-header">
@@ -273,7 +279,7 @@ with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
             )
             validation_msg = gr.Markdown(value="", elem_classes=["validation-error"])
 
-            gr.HTML(f'<div class="model-badge">Modelo ativo &nbsp;·&nbsp; <code>{HF_MODEL}</code></div>')
+            gr.HTML(f'<div class="model-badge">Modelo ativo &nbsp;·&nbsp; <code>{ACTIVE_MODEL}</code></div>')
 
             submit_btn = gr.Button("Consultar", variant="primary", elem_classes=["submit-btn"])
 
@@ -315,6 +321,7 @@ with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
 if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0",
-        server_port=7860,
+        server_port=GRADIO_PORT,
         share=False,
+        css=CSS,
     )

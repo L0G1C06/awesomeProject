@@ -33,4 +33,16 @@ async def rag_query(
         return result
     except Exception as e:
         logger.error(f"Erro na query RAG: {e}")
+        message = str(e)
+
+        if "insufficient_quota" in message or "exceeded your current quota" in message.lower():
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "A chave da OpenAI foi aceita, mas a conta está sem cota/crédito de API "
+                    "ou atingiu o limite mensal de gasto. Verifique o billing em "
+                    "https://platform.openai.com/account/billing/overview."
+                ),
+            )
+
         raise HTTPException(status_code=500, detail=str(e))
