@@ -29,20 +29,17 @@ class OpenAIService:
     def generate(self, prompt: str, system: str | None = None, max_tokens: int = 768) -> str:
         logger.info(f"Geração com modelo OpenAI: {self.model_name}")
 
-        request_args = {
-            "model": self.model_name,
-            "input": prompt,
-            "max_output_tokens": max_tokens,
-        }
-
+        messages = []
         if system:
-            request_args["instructions"] = system
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
 
-        if settings.OPENAI_REASONING_EFFORT:
-            request_args["reasoning"] = {"effort": settings.OPENAI_REASONING_EFFORT}
-
-        response = self.client.with_options(
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            max_completion_tokens=max_tokens,
+            temperature=0.1,
             timeout=settings.OPENAI_TIMEOUT_SECONDS,
-        ).responses.create(**request_args)
+        )
 
-        return (response.output_text or "").strip()
+        return response.choices[0].message.content.strip()

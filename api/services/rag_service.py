@@ -1,6 +1,6 @@
 """
 Serviço RAG: orquestra embedding, retrieval e geração.
-Suporta routing automático entre HuggingFace e Ollama.
+Suporta roteamento automático entre Ollama, HuggingFace e OpenAI.
 """
 import json
 import tempfile
@@ -14,7 +14,7 @@ import os
 os.environ["MLFLOW_S3_ENDPOINT_URL"] = "http://localhost:9000"
 os.environ["AWS_ACCESS_KEY_ID"]      = "minioadmin"
 os.environ["AWS_SECRET_ACCESS_KEY"]  = "minioadmin"
-os.environ["MLFLOW_TRACKING_URI"]    = "http://localhost:5000"  # ← essa linha era o que faltava
+os.environ["MLFLOW_TRACKING_URI"]    = "http://localhost:5000"
 
 import mlflow
 
@@ -27,22 +27,28 @@ from api.services.reranker_service import RerankerService
 from api.schemas.config import settings
 
 
-def _is_ollama_model(model: str) -> bool:
+def _detect_provider(model: str) -> str:
     """
-    Detecta se o modelo é do Ollama (local).
-    Modelos HuggingFace têm o formato 'org/model'.
-    Modelos Ollama são simples nomes sem '/'.
+    Detecta o provedor baseado no nome do modelo.
+    - HuggingFace: 'org/model' (contém /)
+    - OpenAI: Começa com 'gpt-' ou 'gpt4'
+    - Ollama: Outros nomes simples (llama2, neural-chat, etc)
     """
     if not model:
-        return False
-    # Se contém '/', é provavelmente HuggingFace (org/model-name)
+        return "huggingface"
+    
+    model_lower = model.lower()
+    
+    # OpenAI
+    if model_lower.startswith("gpt-") or model_lower.startswith("gpt4"):
+        return "openai"
+    
+    # HuggingFace (format org/model)
     if "/" in model:
-        return False
-    # Se contém 'hf-' ou é conhecido como HuggingFace, assume HF
-    if model.startswith("hf-") or "huggingface" in model.lower():
-        return False
-    # Caso contrário, assume Ollama (nomes simples como llama2, neural-chat, etc)
-    return True
+        return "huggingface"
+    
+    # Ollama (nomes locais simples)
+    return "ollama"
 
 SYSTEM_PROMPT = """You are a scientific article assistant. Your ONLY knowledge source is the documents provided in each query. You have no external knowledge and must never use it.
 
@@ -127,52 +133,181 @@ class RAGService:
         self.milvus = MilvusService()
         self.db = PostgresService()
         self.hf = HuggingFaceService()
+        self.openai = OpenAIService()
         self.reranker = RerankerService()
-        self.llm = self._build_llm_service()
 
-    def _build_llm_service(self):
-        provider = settings.LLM_PROVIDER.strip().lower()
-
-        if provider == "huggingface":
-            return self.hf
-        if provider == "openai":
-            return OpenAIService()
-
-        raise ValueError(
-            "LLM_PROVIDER inválido. Use 'huggingface' ou 'openai'."
-        )
-
-    async def query(self, query: str, top_k: int = 8, llm_model: str = None) -> QueryResponse:
+    async def query(
+        self,
+        query: str,
+        top_k: int = 5,
+        llm_model: str = None,
+        llm_provider: str = None,
+    ) -> QueryResponse:
         """
-        Realiza uma query RAG com suporte automático a Ollama e HuggingFace.
+        Realiza uma query RAG com suporte a Ollama, HuggingFace e OpenAI.
         
         Args:
             query: Texto da pergunta
             top_k: Número de documentos a recuperar
-            llm_model: Nome do modelo (auto-detecta Ollama vs HuggingFace)
-                      Se None, usa padrão do HuggingFace
+            llm_model: Nome do modelo. Se None, usa padrão do provider.
+            llm_provider: 'ollama', 'huggingface' ou 'openai'. 
+                         Se None, detecta pelo llm_model ou usa .env
         """
-        # Determina qual modelo usar
-        if not llm_model:
-            llm_model = settings.HF_LLM_MODEL
-        
-        # Detecta o tipo de modelo e roteia para o serviço correto
-        use_ollama = _is_ollama_model(llm_model)
-        
-        if use_ollama:
-            logger.info(f"Usando Ollama para modelo: {llm_model}")
-            return await self._query_with_ollama(query=query, top_k=top_k, llm_model=llm_model)
+        # Determina o provider
+        if llm_provider and llm_provider.lower() in ("ollama", "huggingface", "openai"):
+            provider = llm_provider.lower()
+        elif llm_model:
+            provider = _detect_provider(llm_model)
         else:
-            logger.info(f"Usando HuggingFace para modelo: {llm_model}")
-            return await self._query_with_huggingface(query=query, top_k=top_k, llm_model=llm_model)
+            # Usa padrão do .env
+            provider = settings.LLM_PROVIDER.strip().lower()
+        
+        # Determina o modelo
+        if not llm_model:
+            if provider == "openai":
+                llm_model = settings.OPENAI_MODEL
+            elif provider == "ollama":
+                llm_model = settings.OLLAMA_LLM_MODEL
+            else:
+                llm_model = settings.HF_LLM_MODEL
+        
+        # Roteia para o provider correto
+        if provider == "openai":
+            return await self._query_with_openai(
+                query=query,
+                top_k=top_k,
+                llm_model=llm_model,
+            )
+        elif provider == "ollama":
+            return await self._query_with_ollama(
+                query=query,
+                top_k=top_k,
+                llm_model=llm_model,
+            )
+        else:
+            return await self._query_with_huggingface(
+                query=query,
+                top_k=top_k,
+                llm_model=llm_model,
+            )
+
+    async def _query_with_openai(self, query: str, top_k: int, llm_model: str) -> QueryResponse:
+        """Implementação RAG com OpenAI."""
+        run_id = str(uuid.uuid4())
+        start = time.time()
+
+        mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(settings.MLFLOW_EXPERIMENT_NAME)
+
+        with mlflow.start_run(run_name=f"rag-query-{run_id[:8]}") as run:
+
+            mlflow.log_params({
+                "query": query[:200],
+                "top_k": top_k,
+                "llm_model": llm_model,
+                "embed_model": settings.HF_EMBED_MODEL,
+                "llm_provider": "openai",
+            })
+
+            # ── 1. EMBEDDING ───────────────────────────────
+            logger.info("Gerando embedding da query com HuggingFace...")
+            query_vector = self.hf.embed(query)
+
+            # ── 2. RETRIEVAL ───────────────────────────────
+            logger.info(f"Buscando top-{top_k} documentos...")
+            hits = self.milvus.search(
+                vector=query_vector,
+                top_k=top_k,
+                collection_name=settings.MILVUS_COLLECTION,
+            )
+
+            retrieved_docs = [
+                RetrievedDoc(
+                    score=float(h["score"]),
+                    title=h.get("metadata", {}).get("title"),
+                    url=h.get("metadata", {}).get("id"),
+                    arxiv_id=h.get("metadata", {}).get("arxiv_id"),
+                    authors=_normalize_text_metadata(
+                        h.get("metadata", {}).get("authors")
+                    ),
+                    categories=_normalize_text_metadata(
+                        h.get("metadata", {}).get("categories")
+                    ),
+                    primary_category=_normalize_text_metadata(
+                        h.get("metadata", {}).get("primary_category")
+                    ),
+                    content=h["content"],
+                    published=_normalize_text_metadata(
+                        h.get("metadata", {}).get("published")
+                    ),
+                    updated=_normalize_text_metadata(
+                        h.get("metadata", {}).get("updated")
+                    ),
+                )
+                for h in hits
+            ]
+
+            mlflow.log_metric("docs_retrieved", len(retrieved_docs))
+            _log_docs_table(retrieved_docs, tag="retrieved")
+
+            # ── 3. PROMPT ──────────────────────────────────
+            context = "\n\n".join(
+                f"[Documento {i+1}] (score: {doc.score:.2f})\n{doc.content}"
+                for i, doc in enumerate(retrieved_docs)
+            )
+
+            prompt = self._build_prompt(query=query, context=context)
+
+            # ── 4. LLM ─────────────────────────────────────
+            logger.info(f"Gerando resposta com OpenAI:{llm_model}...")
+            answer = self.openai.generate(
+                prompt=prompt,
+                system=SYSTEM_PROMPT,
+                max_tokens=768,
+            )
+
+            # ── 5. MÉTRICAS ────────────────────────────────
+            latency_ms = int((time.time() - start) * 1000)
+            prompt_tokens = len(prompt.split())
+            response_tokens = len(answer.split())
+
+            mlflow.log_metrics({
+                "latency_ms": latency_ms,
+                "prompt_tokens": prompt_tokens,
+                "response_tokens": response_tokens,
+                "total_tokens": prompt_tokens + response_tokens,
+            })
+
+            mlflow.log_param("prompt_preview", prompt[:300])
+            mlflow.log_param("response_preview", answer[:300])
+
+            # ── 6. DATABASE ────────────────────────────────
+            await self.db.save_rag_run(
+                run_id=run_id,
+                mlflow_run_id=run.info.run_id,
+                query=query,
+                retrieved_docs=[d.model_dump() for d in retrieved_docs],
+                prompt_used=prompt,
+                response=answer,
+                llm_model=llm_model,
+                latency_ms=latency_ms,
+                top_k=top_k,
+                embed_model=settings.HF_EMBED_MODEL,
+            )
+
+        return QueryResponse(
+            run_id=run_id,
+            query=query,
+            answer=answer,
+            retrieved_docs=retrieved_docs,
+            llm_provider="openai",
+            llm_model=llm_model,
+            latency_ms=latency_ms,
+            mlflow_run_id=run.info.run_id,
+        )
 
     async def _query_with_huggingface(self, query: str, top_k: int, llm_model: str) -> QueryResponse:
         """Implementação RAG com HuggingFace."""
-        import ollama
-        
-    async def query(self, query: str, top_k: int = 8) -> QueryResponse:
-        llm_model = self.llm.model_name
-        llm_provider = self.llm.provider_name
         run_id = str(uuid.uuid4())
         start = time.time()
 
@@ -185,11 +320,10 @@ class RAGService:
                 "query": query[:200],
                 "top_k_before_rerank": top_k,
                 "top_k_after_rerank": 3,
-                "llm_provider": llm_provider,
+                "llm_provider": "huggingface",
                 "llm_model": llm_model,
                 "embed_model": settings.HF_EMBED_MODEL,
                 "reranker_used": True,
-                "llm_provider": "huggingface",
             })
 
             # ── 1. EMBEDDING ───────────────────────────────
@@ -255,8 +389,8 @@ class RAGService:
             prompt = self._build_prompt(query=query, context=context)
 
             # ── 5. LLM ─────────────────────────────────────
-            logger.info(f"Gerando resposta com {llm_provider}:{llm_model}...")
-            answer = self.llm.generate(
+            logger.info(f"Gerando resposta com HuggingFace:{llm_model}...")
+            answer = self.hf.generate(
                 prompt=prompt,
                 system=SYSTEM_PROMPT,
                 max_tokens=768,
@@ -293,8 +427,10 @@ class RAGService:
 
         return QueryResponse(
             run_id=run_id,
+            query=query,
             answer=answer,
             retrieved_docs=retrieved_docs,
+            llm_provider="huggingface",
             llm_model=llm_model,
             latency_ms=latency_ms,
             mlflow_run_id=run.info.run_id,
@@ -351,12 +487,22 @@ class RAGService:
                     title=h.get("metadata", {}).get("title"),
                     url=h.get("metadata", {}).get("id"),
                     arxiv_id=h.get("metadata", {}).get("arxiv_id"),
-                    authors=h.get("metadata", {}).get("authors"),
-                    categories=h.get("metadata", {}).get("categories"),
-                    primary_category=h.get("metadata", {}).get("primary_category"),
+                    authors=_normalize_text_metadata(
+                        h.get("metadata", {}).get("authors")
+                    ),
+                    categories=_normalize_text_metadata(
+                        h.get("metadata", {}).get("categories")
+                    ),
+                    primary_category=_normalize_text_metadata(
+                        h.get("metadata", {}).get("primary_category")
+                    ),
                     content=h["content"],
-                    published=h.get("metadata", {}).get("published"),
-                    updated=h.get("metadata", {}).get("updated"),
+                    published=_normalize_text_metadata(
+                        h.get("metadata", {}).get("published")
+                    ),
+                    updated=_normalize_text_metadata(
+                        h.get("metadata", {}).get("updated")
+                    ),
                 )
                 for h in hits
             ]
@@ -420,6 +566,7 @@ class RAGService:
 
         return QueryResponse(
             run_id=run_id,
+            query=query,
             answer=answer,
             retrieved_docs=retrieved_docs,
             llm_provider="ollama",

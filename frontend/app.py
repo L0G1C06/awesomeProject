@@ -30,25 +30,46 @@ HUGGINGFACE_MODELS = [
     "meta-llama/Meta-Llama-3-8B-Instruct",
 ]
 
+# Modelos OpenAI (via API)
+OPENAI_MODELS = [
+    "gpt-5.4-mini"
+]
+
 # Combina os modelos com rótulos visuais para distinguir
 AVAILABLE_MODELS = (
-    [f"🔵 {m} [local]" for m in OLLAMA_MODELS] +
-    [f"🟠 {m} [huggingface]" for m in HUGGINGFACE_MODELS]
+    [f"🔵 {m} [ollama]" for m in OLLAMA_MODELS] +
+    [f"🟠 {m} [huggingface]" for m in HUGGINGFACE_MODELS] +
+    [f"🔴 {m} [openai]" for m in OPENAI_MODELS]
 )
 
 # Garante que o modelo padrão do .env esteja na lista
-if HF_MODEL not in AVAILABLE_MODELS:
+DEFAULT_DISPLAY = None
+if OPENAI_MODEL and LLM_PROVIDER == "openai":
+    for model in AVAILABLE_MODELS:
+        if OPENAI_MODEL in model:
+            DEFAULT_DISPLAY = model
+            break
+    else:
+        if OPENAI_MODEL.startswith("gpt"):
+            DEFAULT_DISPLAY = f"🔴 {OPENAI_MODEL} [openai]"
+elif HF_MODEL:
     for model in AVAILABLE_MODELS:
         if HF_MODEL in model:
+            DEFAULT_DISPLAY = model
             break
     else:
         # Se não encontrando, adiciona com a marcação correta
         if "/" in HF_MODEL:
             # É um modelo HuggingFace
-            AVAILABLE_MODELS.insert(0, f"🟠 {HF_MODEL} [huggingface]")
+            DEFAULT_DISPLAY = f"🟠 {HF_MODEL} [huggingface]"
+            AVAILABLE_MODELS.insert(0, DEFAULT_DISPLAY)
         else:
             # É um modelo Ollama
-            AVAILABLE_MODELS.insert(0, f"🔵 {HF_MODEL} [local]")
+            DEFAULT_DISPLAY = f"🔵 {HF_MODEL} [ollama]"
+            AVAILABLE_MODELS.insert(0, DEFAULT_DISPLAY)
+
+if not DEFAULT_DISPLAY:
+    DEFAULT_DISPLAY = AVAILABLE_MODELS[0] if AVAILABLE_MODELS else HF_MODEL
 
 # ── CSS ────────────────────────────────────────────────────────────────────────
 CSS = """
@@ -153,15 +174,29 @@ def validate_top_k(value) -> tuple[int, str]:
 # ── Helpers ────────────────────────────────────────────────────────────────────
 def _extract_model_name(display_name: str) -> str:
     """
-    Extrai o nome real do modelo a partir do nome formatado.
-    Ex: "🔵 llama2:7b [local]" → "llama2:7b"
-    Ex: "🟠 meta-llama/Meta-Llama-3-8B-Instruct [huggingface]" → "meta-llama/Meta-Llama-3-8B-Instruct"
+    Extrai o nome real do modelo e provider a partir do nome formatado.
+    Ex: "🔵 llama2 [ollama]" → ("llama2", "ollama")
+    Ex: "🟠 meta-llama/Meta-Llama-3-8B-Instruct [huggingface]" → ("meta-llama/Meta-Llama-3-8B-Instruct", "huggingface")
+    Ex: "🔴 gpt-4 [openai]" → ("gpt-4", "openai")
     """
-    # Remove o emoji no início (2 caracteres)
-    name = display_name[2:] if len(display_name) > 2 and display_name[0] in "🔵🟠" else display_name
-    # Remove o sufixo [local] ou [huggingface]
-    name = name.rsplit(" [", 1)[0] if " [" in name else name
-    return name.strip()
+    if not display_name:
+        return None, None
+    
+    # Remove o emoji no início (3-4 bytes dependendo do emoji)
+    name = display_name
+    for emoji in ["🔵", "🟠", "🔴"]:
+        if name.startswith(emoji + " "):
+            name = name[2:].lstrip()
+            break
+    
+    # Extrai o provider entre colchetes [provider]
+    provider = None
+    if "[" in name and "]" in name:
+        model_part, provider_part = name.rsplit("[", 1)
+        provider = provider_part.rstrip("]").strip()
+        name = model_part.strip()
+    
+    return name, provider
 
 
 def _pill(text: str) -> str:
@@ -240,8 +275,13 @@ def query_rag(question: str, top_k_raw, selected_model: str) -> tuple[str, str, 
 
     top_k, _ = validate_top_k(top_k_raw)
 
-    # Extrai o nome real do modelo a partir da exibição formatada
-    model_to_use = _extract_model_name(selected_model) if selected_model else HF_MODEL
+    # Extrai o nome real do modelo e provider a partir da exibição formatada
+    model_to_use, provider_to_use = _extract_model_name(selected_model) if selected_model else (HF_MODEL, LLM_PROVIDER)
+    
+    if not model_to_use:
+        model_to_use = HF_MODEL
+    if not provider_to_use:
+        provider_to_use = LLM_PROVIDER
 
     try:
         with httpx.Client(timeout=120.0) as client:
@@ -250,17 +290,18 @@ def query_rag(question: str, top_k_raw, selected_model: str) -> tuple[str, str, 
                 json={
                     "query": question,
                     "top_k": top_k,
-                    "llm_model": model_to_use,   # <── enviando o nome real do modelo
+                    "llm_model": model_to_use,
+                    "llm_provider": provider_to_use,
                 },
             )
             response.raise_for_status()
             data = response.json()
 
         # ── Campos de QueryResponse ──
-        answer       = data.get("answer", "")          # mantido por compatibilidade futura
+        answer       = data.get("answer", "")
         latency      = data.get("latency_ms", 0)
-        provider     = data.get("llm_provider", LLM_PROVIDER)
-        model        = data.get("llm_model", ACTIVE_MODEL)
+        provider     = data.get("llm_provider", provider_to_use)
+        model        = data.get("llm_model", model_to_use)
         docs         = data.get("retrieved_docs", [])
         run_id       = data.get("run_id", "")
         mlflow_run   = data.get("mlflow_run_id")
@@ -321,9 +362,9 @@ with gr.Blocks(title="Buscador de Documentos Científicos") as demo:
             # ── Seletor de modelo ──────────────────────────────────────────────
             model_dropdown = gr.Dropdown(
                 label="Modelo de linguagem",
-                info="🔵 Modelos locais (Ollama) | 🟠 Modelos remotos (HuggingFace API)",
+                info="🔵 Modelos locais (Ollama) | 🟠 Modelos remostos (HuggingFace) | 🔴 Modelos OpenAI",
                 choices=AVAILABLE_MODELS,
-                value=AVAILABLE_MODELS[0] if AVAILABLE_MODELS else HF_MODEL,
+                value=DEFAULT_DISPLAY,
                 allow_custom_value=True,   # permite digitar um HF model ID customizado
                 elem_classes=["model-selector-wrap"],
             )
@@ -335,8 +376,6 @@ with gr.Blocks(title="Buscador de Documentos Científicos") as demo:
                 elem_classes=["top-k-wrap"],
             )
             validation_msg = gr.Markdown(value="", elem_classes=["validation-error"])
-
-            gr.HTML(f'<div class="model-badge">Modelo ativo &nbsp;·&nbsp; <code>{ACTIVE_MODEL}</code></div>')
 
             submit_btn = gr.Button("Consultar", variant="primary", elem_classes=["submit-btn"])
 
