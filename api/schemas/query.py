@@ -26,7 +26,10 @@ class RetrievedDoc(BaseModel):
 class QueryResponse(BaseModel):
     run_id: str
     answer: str = Field(default="", description="Resposta gerada pelo LLM")
+    query: str
+    answer: str
     retrieved_docs: list[RetrievedDoc] = Field(default_factory=list)
+    llm_provider: str
     llm_model: str
     latency_ms: int
     mlflow_run_id: str | None = None

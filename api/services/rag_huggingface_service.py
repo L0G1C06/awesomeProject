@@ -13,6 +13,8 @@ class HuggingFaceService:
                 "HUGGINGFACE_API_TOKEN não configurado. "
                 "Acesse https://huggingface.co/settings/tokens"
             )
+        self.model_name = settings.HF_LLM_MODEL
+        self.provider_name = "huggingface"
         # hf-inference: suporta feature_extraction (embeddings)
         self.embed_client = InferenceClient(
             provider="hf-inference",
@@ -38,7 +40,7 @@ class HuggingFaceService:
         return result
 
     def generate(self, prompt: str, system: str = None, max_tokens: int = 768) -> str:
-        logger.info(f"Geração com modelo: {settings.HF_LLM_MODEL}")
+        logger.info(f"Geração com modelo: {self.model_name}")
         
         messages = []
         if system:
@@ -47,7 +49,7 @@ class HuggingFaceService:
         
         result = self.llm_client.chat_completion(
             messages=messages,
-            model=settings.HF_LLM_MODEL,
+            model=self.model_name,
             max_tokens=max_tokens,
             temperature=0.1,
         )
