@@ -5,7 +5,7 @@ import time
 import uuid
 from loguru import logger
 import mlflow
-import ollama
+from ollama import Client
 
 from api.schemas.query import QueryResponse, RetrievedDoc
 from api.services.milvus_service import MilvusService
@@ -20,6 +20,8 @@ class RAGService:
 
     async def query(self, query: str, top_k: int = 5, llm_model: str = None) -> QueryResponse:
         llm_model = llm_model or settings.OLLAMA_LLM_MODEL
+        # Cria cliente com timeout maior (padrão é 30s)
+        client = Client(host=settings.OLLAMA_HOST, timeout=120.0)
         run_id = str(uuid.uuid4())
         start = time.time()
 
@@ -36,11 +38,17 @@ class RAGService:
 
             # ── 1. Embed da query ──────────────────────────────
             logger.info("Gerando embedding da query...")
-            embed_response = ollama.embeddings(
-                model=settings.OLLAMA_EMBED_MODEL,
-                prompt=query,
-            )
-            query_vector = embed_response["embedding"]
+            logger.info(f"Conectando ao Ollama em {settings.OLLAMA_HOST} com modelo {settings.OLLAMA_EMBED_MODEL}")
+            try:
+                embed_response = client.embeddings(
+                    model=settings.OLLAMA_EMBED_MODEL,
+                    prompt=query,
+                )
+                logger.info("Embedding gerado com sucesso")
+                query_vector = embed_response["embedding"]
+            except Exception as e:
+                logger.error(f"Erro ao gerar embedding: {str(e)}")
+                raise
 
             # ── 2. Retrieval no Milvus ─────────────────────────
             logger.info(f"Buscando top-{top_k} documentos...")
@@ -68,11 +76,17 @@ class RAGService:
 
             # ── 4. Geração via Ollama ──────────────────────────
             logger.info(f"Gerando resposta com {llm_model}...")
-            response = ollama.chat(
-                model=llm_model,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            answer = response["message"]["content"]
+            logger.info(f"Conectando ao Ollama em {settings.OLLAMA_HOST} com modelo {llm_model}")
+            try:
+                response = client.chat(
+                    model=llm_model,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                logger.info("Resposta gerada com sucesso")
+                answer = response["message"]["content"]
+            except Exception as e:
+                logger.error(f"Erro ao gerar resposta: {str(e)}")
+                raise
 
             # Captura tokens da resposta do Ollama
             prompt_tokens    = response.get("prompt_eval_count", 0)

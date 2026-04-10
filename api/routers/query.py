@@ -22,13 +22,14 @@ async def rag_query(
 ):
     """
     Recebe uma pergunta, recupera documentos relevantes do Milvus
-    e gera resposta via LLM (Ollama).
+    e gera resposta via LLM (Ollama ou HuggingFace).
     """
     try:
         logger.info(f"Query recebida: {request.query[:80]}...")
         result = await service.query(
             query=request.query,
             top_k=request.top_k,
+            llm_model=request.llm_model,
         )
         return result
     except Exception as e:

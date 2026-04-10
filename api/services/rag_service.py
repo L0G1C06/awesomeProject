@@ -1,5 +1,6 @@
 """
 Serviço RAG: orquestra embedding, retrieval e geração.
+Suporta routing automático entre HuggingFace e Ollama.
 """
 import json
 import tempfile
@@ -23,6 +24,24 @@ from api.services.postgres_service import PostgresService
 from api.services.rag_huggingface_service import HuggingFaceService
 from api.services.reranker_service import RerankerService
 from api.schemas.config import settings
+
+
+def _is_ollama_model(model: str) -> bool:
+    """
+    Detecta se o modelo é do Ollama (local).
+    Modelos HuggingFace têm o formato 'org/model'.
+    Modelos Ollama são simples nomes sem '/'.
+    """
+    if not model:
+        return False
+    # Se contém '/', é provavelmente HuggingFace (org/model-name)
+    if "/" in model:
+        return False
+    # Se contém 'hf-' ou é conhecido como HuggingFace, assume HF
+    if model.startswith("hf-") or "huggingface" in model.lower():
+        return False
+    # Caso contrário, assume Ollama (nomes simples como llama2, neural-chat, etc)
+    return True
 
 SYSTEM_PROMPT = """You are a scientific article assistant. Your ONLY knowledge source is the documents provided in each query. You have no external knowledge and must never use it.
 
@@ -98,8 +117,34 @@ class RAGService:
         self.hf = HuggingFaceService()
         self.reranker = RerankerService()
 
-    async def query(self, query: str, top_k: int = 8) -> QueryResponse:
-        llm_model = settings.HF_LLM_MODEL
+    async def query(self, query: str, top_k: int = 8, llm_model: str = None) -> QueryResponse:
+        """
+        Realiza uma query RAG com suporte automático a Ollama e HuggingFace.
+        
+        Args:
+            query: Texto da pergunta
+            top_k: Número de documentos a recuperar
+            llm_model: Nome do modelo (auto-detecta Ollama vs HuggingFace)
+                      Se None, usa padrão do HuggingFace
+        """
+        # Determina qual modelo usar
+        if not llm_model:
+            llm_model = settings.HF_LLM_MODEL
+        
+        # Detecta o tipo de modelo e roteia para o serviço correto
+        use_ollama = _is_ollama_model(llm_model)
+        
+        if use_ollama:
+            logger.info(f"Usando Ollama para modelo: {llm_model}")
+            return await self._query_with_ollama(query=query, top_k=top_k, llm_model=llm_model)
+        else:
+            logger.info(f"Usando HuggingFace para modelo: {llm_model}")
+            return await self._query_with_huggingface(query=query, top_k=top_k, llm_model=llm_model)
+
+    async def _query_with_huggingface(self, query: str, top_k: int, llm_model: str) -> QueryResponse:
+        """Implementação RAG com HuggingFace."""
+        import ollama
+        
         run_id = str(uuid.uuid4())
         start = time.time()
 
@@ -115,6 +160,7 @@ class RAGService:
                 "llm_model": llm_model,
                 "embed_model": settings.HF_EMBED_MODEL,
                 "reranker_used": True,
+                "llm_provider": "huggingface",
             })
 
             # ── 1. EMBEDDING ───────────────────────────────
@@ -208,7 +254,133 @@ class RAGService:
 
         return QueryResponse(
             run_id=run_id,
-            query=query,
+            answer=answer,
+            retrieved_docs=retrieved_docs,
+            llm_model=llm_model,
+            latency_ms=latency_ms,
+            mlflow_run_id=run.info.run_id,
+        )
+
+    async def _query_with_ollama(self, query: str, top_k: int, llm_model: str) -> QueryResponse:
+        """Implementação RAG com Ollama (local)."""
+        from ollama import Client
+        
+        # Cria cliente com timeout maior (padrão é 30s)
+        client = Client(host=settings.OLLAMA_HOST, timeout=120.0)
+        
+        run_id = str(uuid.uuid4())
+        start = time.time()
+
+        mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(settings.MLFLOW_EXPERIMENT_NAME)
+
+        with mlflow.start_run(run_name=f"rag-query-{run_id[:8]}") as run:
+
+            mlflow.log_params({
+                "query": query[:200],
+                "top_k": top_k,
+                "llm_model": llm_model,
+                "embed_model": settings.OLLAMA_EMBED_MODEL,
+                "llm_provider": "ollama",
+            })
+
+            # ── 1. EMBEDDING ───────────────────────────────
+            logger.info("Gerando embedding da query com Ollama...")
+            logger.info(f"Conectando ao Ollama em {settings.OLLAMA_HOST} com modelo {settings.OLLAMA_EMBED_MODEL}")
+            try:
+                embed_response = client.embeddings(
+                    model=settings.OLLAMA_EMBED_MODEL,
+                    prompt=query,
+                )
+                logger.info("Embedding gerado com sucesso")
+                query_vector = embed_response["embedding"]
+            except Exception as e:
+                logger.error(f"Erro ao gerar embedding: {str(e)}")
+                raise
+
+            # ── 2. RETRIEVAL ───────────────────────────────
+            logger.info(f"Buscando top-{top_k} documentos...")
+            hits = self.milvus.search(
+                vector=query_vector,
+                top_k=top_k,
+                collection_name=settings.MILVUS_COLLECTION,
+            )
+
+            retrieved_docs = [
+                RetrievedDoc(
+                    score=float(h["score"]),
+                    title=h.get("metadata", {}).get("title"),
+                    url=h.get("metadata", {}).get("id"),
+                    arxiv_id=h.get("metadata", {}).get("arxiv_id"),
+                    authors=h.get("metadata", {}).get("authors"),
+                    categories=h.get("metadata", {}).get("categories"),
+                    primary_category=h.get("metadata", {}).get("primary_category"),
+                    content=h["content"],
+                    published=h.get("metadata", {}).get("published"),
+                    updated=h.get("metadata", {}).get("updated"),
+                )
+                for h in hits
+            ]
+
+            mlflow.log_metric("docs_retrieved", len(retrieved_docs))
+
+            # ── 3. PROMPT ──────────────────────────────────
+            context = "\n\n".join(
+                f"[Documento {i+1}] (score: {doc.score:.2f})\n{doc.content}"
+                for i, doc in enumerate(retrieved_docs)
+            )
+
+            prompt = self._build_prompt(query=query, context=context)
+
+            # ── 4. LLM ─────────────────────────────────────
+            logger.info(f"Gerando resposta com {llm_model} (Ollama)...")
+            logger.info(f"Conectando ao Ollama em {settings.OLLAMA_HOST} com modelo {llm_model}")
+            try:
+                response = client.chat(
+                    model=llm_model,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                )
+                logger.info("Resposta gerada com sucesso")
+                answer = response["message"]["content"]
+            except Exception as e:
+                logger.error(f"Erro ao gerar resposta: {str(e)}")
+                raise
+
+            prompt_tokens = response.get("prompt_eval_count", 0)
+            response_tokens = response.get("eval_count", 0)
+
+            # ── 5. MÉTRICAS ────────────────────────────────
+            latency_ms = int((time.time() - start) * 1000)
+
+            mlflow.log_metrics({
+                "latency_ms": latency_ms,
+                "prompt_tokens": prompt_tokens,
+                "response_tokens": response_tokens,
+                "total_tokens": prompt_tokens + response_tokens,
+            })
+
+            mlflow.log_param("prompt_preview", prompt[:300])
+            mlflow.log_param("response_preview", answer[:300])
+
+            # ── 6. DATABASE ────────────────────────────────
+            await self.db.save_rag_run(
+                run_id=run_id,
+                mlflow_run_id=run.info.run_id,
+                query=query,
+                retrieved_docs=[d.model_dump() for d in retrieved_docs],
+                prompt_used=prompt,
+                response=answer,
+                llm_model=llm_model,
+                latency_ms=latency_ms,
+                top_k=top_k,
+                embed_model=settings.OLLAMA_EMBED_MODEL,
+            )
+
+        return QueryResponse(
+            run_id=run_id,
             answer=answer,
             retrieved_docs=retrieved_docs,
             llm_model=llm_model,

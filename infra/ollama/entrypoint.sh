@@ -6,13 +6,16 @@ set -e
 LLM_MODEL="${OLLAMA_LLM_MODEL:-llama3.2}"
 EMBED_MODEL="${OLLAMA_EMBED_MODEL:-nomic-embed-text}"
 
+# Set Ollama to listen on port 11435 (or use OLLAMA_HOST if already set)
+export OLLAMA_HOST="${OLLAMA_HOST:-http://0.0.0.0:11435}"
+
 echo "[ollama] Iniciando servidor..."
 ollama serve &
 SERVER_PID=$!
 
 # Aguarda o servidor estar pronto
 echo "[ollama] Aguardando servidor iniciar..."
-until curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; do
+until curl -sf http://localhost:11435/api/tags > /dev/null 2>&1; do
   sleep 2
 done
 echo "[ollama] Servidor pronto!"
