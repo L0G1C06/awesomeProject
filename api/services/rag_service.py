@@ -11,10 +11,10 @@ from loguru import logger
 
 # ── Must set BEFORE importing mlflow ──────────────────────────
 import os
-os.environ["MLFLOW_S3_ENDPOINT_URL"] = "http://localhost:9000"
-os.environ["AWS_ACCESS_KEY_ID"]      = "minioadmin"
-os.environ["AWS_SECRET_ACCESS_KEY"]  = "minioadmin"
-os.environ["MLFLOW_TRACKING_URI"]    = "http://localhost:5000"
+os.environ.setdefault("MLFLOW_S3_ENDPOINT_URL", "http://localhost:9000")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "minioadmin")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "minioadmin")
+os.environ.setdefault("MLFLOW_TRACKING_URI", "http://localhost:5000")
 
 import mlflow
 

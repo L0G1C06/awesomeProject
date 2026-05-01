@@ -12,6 +12,7 @@ load_dotenv()
 API_URL       = os.getenv("API_URL", "http://localhost:8001")
 HF_MODEL      = os.getenv("HF_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
 LLM_PROVIDER  = os.getenv("LLM_PROVIDER", "huggingface").lower()
+OLLAMA_MODEL  = os.getenv("OLLAMA_LLM_MODEL", "mistral")
 OPENAI_MODEL  = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 ACTIVE_MODEL  = OPENAI_MODEL if LLM_PROVIDER == "openai" else HF_MODEL
 GRADIO_PORT   = int(os.getenv("GRADIO_SERVER_PORT", "7860"))
@@ -21,9 +22,11 @@ TOP_K_MAX     = 20
 
 # ── Modelos disponíveis ────────────────────────────────────────────────────────
 # Modelos Ollama (locais, rodando em container)
-OLLAMA_MODELS = [
-    "tinyllama",
-]
+OLLAMA_MODELS = list(dict.fromkeys([
+    OLLAMA_MODEL,
+    "llama3.2",
+    "mistral",
+]))
 
 # Modelos HuggingFace (via API remota)
 HUGGINGFACE_MODELS = [
@@ -44,7 +47,15 @@ AVAILABLE_MODELS = (
 
 # Garante que o modelo padrão do .env esteja na lista
 DEFAULT_DISPLAY = None
-if OPENAI_MODEL and LLM_PROVIDER == "openai":
+if OLLAMA_MODEL and LLM_PROVIDER == "ollama":
+    for model in AVAILABLE_MODELS:
+        if OLLAMA_MODEL in model:
+            DEFAULT_DISPLAY = model
+            break
+    else:
+        DEFAULT_DISPLAY = f"🔵 {OLLAMA_MODEL} [ollama]"
+        AVAILABLE_MODELS.insert(0, DEFAULT_DISPLAY)
+elif OPENAI_MODEL and LLM_PROVIDER == "openai":
     for model in AVAILABLE_MODELS:
         if OPENAI_MODEL in model:
             DEFAULT_DISPLAY = model
