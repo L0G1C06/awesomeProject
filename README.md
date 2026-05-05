@@ -1,7 +1,7 @@
 # 🔍 RAG Enterprise Platform — ArXiv Dataset
 
-> Plataforma completa de Retrieval-Augmented Generation com Governança Medallion, totalmente local e containerizada.
-> **Dataset**: ArXiv (https://info.arxiv.org/help/api/index.html)
+> Plataforma completa de Retrieval-Augmented Generation com Governança Medallion, executada localmente via Docker e com suporte a múltiplos provedores de LLM (Ollama, HuggingFace e OpenAI).
+> **Dataset**: ArXiv ([https://info.arxiv.org/help/api/index.html](https://info.arxiv.org/help/api/index.html))
 
 ---
 
@@ -12,6 +12,10 @@
 | **Eduardo Weber Maldaner** | eduwmaldaner@gmail.com | 211948 | Product Owner (PO) |
 | **Lucas Carmargo Oliveira** | Lucaslco2005@gmail.com | 222231 | Scrum Developer |
 | **Jeferson Oliveira Moreira** | jef.moreira1@gmail.com | 212148 | Scrum Developer |
+| **Wallace Eron Melo de Barros** | — | 211751 | Scrum Developer |
+| **Heifor Barreto** | — | 224541 | Scrum Developer |
+| **Nicola Luca Tognocchi** | — | 223138 | Scrum Developer |
+| **Arthur Soares Maffeis** | — | 150448 | Scrum Developer |
 
 ### 📋 Informações do Projeto
 
@@ -25,21 +29,29 @@
 ## 🏗️ Arquitetura
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        APLICAÇÃO                                │
-│   Gradio :7860  ←→  FastAPI :8000                               │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-┌───────────────────────────▼─────────────────────────────────────┐
-│                       CAMADA DE IA                               │
-│   Ollama (LLM + Embeddings)   ←→   MLflow (Tracking)           │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-┌───────────────────────────▼─────────────────────────────────────┐
-│                    CAMADA DE DADOS                               │
-│   MinIO (Bronze/Silver/Gold)  Milvus (Vetorial)  PostgreSQL     │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                           APLICAÇÃO                                  │
+│   Gradio :7860  ──→  FastAPI :8000  (/query/, /docs)                 │
+└────────────────────────────────┬─────────────────────────────────────┘
+                                 │
+┌────────────────────────────────▼─────────────────────────────────────┐
+│                          CAMADA DE IA                                │
+│   Provedores LLM:                                                    │
+│     • Ollama (local)        → embeddings + LLM                       │
+│     • HuggingFace (remoto)  → embeddings + LLM + reranker (local)    │
+│     • OpenAI (remoto)       → LLM (embeddings via HuggingFace)       │
+│   MLflow → tracking de runs, parâmetros, métricas e artefatos        │
+└────────────────────────────────┬─────────────────────────────────────┘
+                                 │
+┌────────────────────────────────▼─────────────────────────────────────┐
+│                        CAMADA DE DADOS                               │
+│   MinIO  (Bronze/Silver/Gold)   Milvus  (Vetorial)   PostgreSQL      │
+│                                  ↑                                   │
+│                           Attu :8080  (UI Milvus)                    │
+└──────────────────────────────────────────────────────────────────────┘
 ```
+
+> Diagrama detalhado em [docs/arquitetura.md](docs/arquitetura.md).
 
 ### Governança Medallion
 
@@ -49,6 +61,21 @@
 | 🥈 **Silver** | `silver/` | Dados limpos e normalizados — abstracts e metadados estruturados |
 | 🥇 **Gold**   | `gold/`   | Chunks prontos para embedding — seções de artigos segmentadas |
 
+### Provedores de LLM
+
+A escolha do provider é dinâmica, podendo vir do payload da requisição (`llm_provider` / `llm_model`), do auto-detect pelo nome do modelo ou da variável `LLM_PROVIDER` no `.env`.
+
+| Provider | Embedding | LLM | Reranker | Observações |
+|----------|-----------|-----|----------|-------------|
+| **`ollama`** | `nomic-embed-text` (local) | `OLLAMA_LLM_MODEL` (ex.: `mistral`, `llama3.2`) | — | 100% local; baixa modelos automaticamente no startup |
+| **`huggingface`** | `BAAI/bge-base-en-v1.5` (Inference API) | `HF_LLM_MODEL` (ex.: `meta-llama/Meta-Llama-3-8B-Instruct`) | `CrossEncoder` local em `models/reranker/` (top-k → top-3) | Requer `HUGGINGFACE_API_TOKEN` |
+| **`openai`** | `BAAI/bge-base-en-v1.5` (HuggingFace) | `OPENAI_MODEL` (ex.: `gpt-4o-mini`) | — | Requer `OPENAI_API_KEY`; embeddings continuam vindo do HF para preservar compatibilidade com o índice já existente |
+
+Auto-detect (em `api/services/rag_service.py::_detect_provider`):
+- Modelo começando com `gpt-` ou `gpt4` → **openai**
+- Modelo no formato `org/model` (com `/`) → **huggingface**
+- Demais nomes simples → **ollama**
+
 ---
 
 ## 📚 Backlog Inicial
@@ -57,52 +84,57 @@
 
 | ID | Tarefa | Descrição | Responsável | Status |
 |----|--------|-----------|-------------|--------|
-| **BS-1** | Escolha do Domínio | Definir foco de pesquisa no ArXiv (ex: Machine Learning, Computer Vision, NLP) | Eduardo | 📋 Backlog |
-| **BS-2** | Definição da Empresa Fictícia | Criar contexto de negócio para a plataforma (ex: "TechInsights AI Research") | Jeferson | 📋 Backlog |
-| **BS-3** | Problema de Negócio | Documentar o problema que a plataforma RAG resolve para a empresa | Eduardo | 📋 Backlog |
-| **BS-4** | Levantamento de Requisitos Funcionais | Mapear features necessárias (busca vetorial, filtros, exportação) | Lucas | 📋 Backlog |
-| **BS-5** | Levantamento de Requisitos Não-Funcionais | Definir SLAs, performance, escalabilidade e segurança | Jeferson | 📋 Backlog |
-| **BS-6** | Definição de Papéis Scrum | Alinhar responsabilidades: Scrum Master, Product Owner, Developers | Eduardo | 📋 Backlog |
+| **BS-1** | Escolha do Domínio | Definir foco de pesquisa no ArXiv (ex: Machine Learning, Computer Vision, NLP) | Eduardo | ✅ Concluído |
+| **BS-2** | Definição da Empresa Fictícia | Criar contexto de negócio para a plataforma | Jeferson | ✅ Concluído |
+| **BS-3** | Problema de Negócio | Documentar o problema que a plataforma RAG resolve para a empresa | Eduardo | ✅ Concluído |
+| **BS-4** | Levantamento de Requisitos Funcionais | Mapear features necessárias (busca vetorial, filtros, exportação) | Lucas | ✅ Concluído |
+| **BS-5** | Levantamento de Requisitos Não-Funcionais | Definir SLAs, performance, escalabilidade e segurança | Jeferson | ✅ Concluído |
+| **BS-6** | Definição de Papéis Scrum | Alinhar responsabilidades: Scrum Master, Product Owner, Developers | Eduardo | ✅ Concluído |
 
 ### Épico 2: Integração com ArXiv API
 
 | ID | Tarefa | Descrição | Responsável | Status |
 |----|--------|-----------|-------------|--------|
-| **AX-1** | Estudo da ArXiv API | Documentar endpoints, limites de taxa e formato de dados | Jeferson | 📋 Backlog |
-| **AX-2** | Implementar Connector ArXiv | Criar módulo de conexão com a API | Jeferson | 📋 Backlog |
-| **AX-3** | ETL Bronze → Silver (ArXiv) | Normalizar metadata e abstracts dos artigos | Lucas | 📋 Backlog |
-| **AX-4** | ETL Silver → Gold | Segmentar artigos em chunks otimizados | Lucas | 📋 Backlog |
+| **AX-1** | Estudo da ArXiv API | Documentar endpoints, limites de taxa e formato de dados | Jeferson | ✅ Concluído |
+| **AX-2** | Implementar Connector ArXiv | Criar módulo de conexão com a API | Jeferson | ✅ Concluído |
+| **AX-3** | ETL Bronze → Silver (ArXiv) | Normalizar metadata e abstracts dos artigos | Lucas | ✅ Concluído |
+| **AX-4** | ETL Silver → Gold | Segmentar artigos em chunks otimizados | Lucas | ✅ Concluído |
 
 ### Épico 3: Implementação RAG
 
 | ID | Tarefa | Descrição | Responsável | Status |
 |----|--------|-----------|-------------|--------|
-| **RAG-1** | Embeddings + Indexação Milvus | Vetorizar chunks e indexar em Milvus | Lucas | 📋 Backlog |
-| **RAG-2** | Busca Vetorial | Implementar recuperação top-k com COSINE similarity | Lucas | 📋 Backlog |
-| **RAG-3** | Geração com LLM | Construir prompts e gerar respostas via Ollama | Eduardo | 📋 Backlog |
-| **RAG-4** | Prompt Engineering | Otimizar templates de prompt para contexto científico | Eduardo | 📋 Backlog |
+| **RAG-1** | Embeddings + Indexação Milvus | Vetorizar chunks e indexar em Milvus (HNSW + COSINE) | Lucas | ✅ Concluído |
+| **RAG-2** | Busca Vetorial | Implementar recuperação top-k por similaridade COSINE | Lucas | ✅ Concluído |
+| **RAG-3** | Geração com LLM | Construir prompts e gerar respostas via Ollama / HuggingFace / OpenAI | Eduardo | ✅ Concluído |
+| **RAG-4** | Prompt Engineering | Otimizar templates de prompt para contexto científico | Eduardo | ✅ Concluído |
+| **RAG-5** | Re-ranker (CrossEncoder) | Reordenar documentos recuperados via modelo treinado localmente | Lucas | ✅ Concluído |
 
 ### Épico 4: Interface e Experiência
 
 | ID | Tarefa | Descrição | Responsável | Status |
 |----|--------|-----------|-------------|--------|
-| **UI-1** | Frontend Gradio | Criar interface de consulta | Jeferson | 📋 Backlog |
-| **UI-2** | Filtros Avançados | Permitir filtrar por categoria, data, autor do ArXiv | Jeferson | 📋 Backlog |
-| **UI-3** | Exibição de Resultados | Mostrar snippets com highlightning de trechos | Lucas | 📋 Backlog |
-| **UI-4** | Exportação de Resultados | Gerar relatórios em PDF/CSV | Jeferson | 📋 Backlog |
+| **UI-1** | Frontend Gradio | Criar interface de consulta | Jeferson | ✅ Concluído |
+| **UI-2** | Seletor de Provider/Modelo | Permitir escolher entre Ollama / HuggingFace / OpenAI | Jeferson | ✅ Concluído |
+| **UI-3** | Exibição de Resultados | Mostrar snippets, scores, autores, categorias e links arXiv | Lucas | ✅ Concluído |
+| **UI-4** | Filtros Avançados | Filtrar por categoria, data, autor | Jeferson | 📋 Backlog |
+| **UI-5** | Exportação de Resultados | Gerar relatórios em PDF/CSV | Jeferson | 📋 Backlog |
 
 ### Épico 5: Observabilidade e Monitoramento
 
 | ID | Tarefa | Descrição | Responsável | Status |
 |----|--------|-----------|-------------|--------|
-| **OBS-1** | MLflow Tracking | Registrar queries, latência e qualidade de respostas | Lucas | 📋 Backlog |
-| **OBS-2** | Dashboard de Performance | Criar dashboard com métricas de uso | Eduardo | 📋 Backlog |
-| **OBS-3** | Alertas e Logs | Configurar logs estruturados e alertas | Jeferson | 📋 Backlog |
+| **OBS-1** | MLflow Tracking | Registrar queries, latência, tokens e artefatos | Lucas | ✅ Concluído |
+| **OBS-2** | Persistência em PostgreSQL | Auditoria, runs RAG, versionamento de datasets | Jeferson | ✅ Concluído |
+| **OBS-3** | Dashboard de Performance | Criar dashboard com métricas de uso | Eduardo | 📋 Backlog |
+| **OBS-4** | Alertas e Logs | Configurar logs estruturados e alertas | Jeferson | 📋 Backlog |
 
 ### Ferramentas de Dados
 
-- **PostgreSQL**: metadados do pipeline, controle de versionamento por dataset e auditoria de eventos.
-- **Milvus**: armazenamento de embeddings e indexação vetorial para retrieval semântico.
+- **PostgreSQL**: metadados do pipeline, controle de versionamento por dataset, registro de runs RAG e auditoria de eventos.
+- **Milvus**: armazenamento de embeddings e indexação vetorial (HNSW / COSINE) para retrieval semântico.
+- **MinIO**: data lake S3-compatible com camadas Bronze, Silver e Gold.
+- **Attu**: console visual do Milvus disponível em `http://localhost:8080`.
 
 ---
 
@@ -112,25 +144,38 @@
 - Docker >= 24.0
 - Docker Compose >= 2.20
 - Make
-- 16GB RAM recomendado (para LLM local)
-- GPU opcional (melhora performance do Ollama)
+- 16GB RAM recomendado (para LLM local via Ollama)
+- GPU opcional (acelera Ollama e o reranker)
 
 ### 1. Clone e configure
+
 ```bash
 git clone <repo-url>
-cd rag-enterprise
-make env          # Cria .env a partir do .env.example
+cd awesomeProject
 ```
+
+Crie o arquivo `.env` na raiz do projeto. Veja o exemplo completo em [Variáveis de Ambiente](#-variáveis-de-ambiente).
 
 ### 2. Suba a infraestrutura
+
 ```bash
-make up           # Sobe todos os serviços
-make pull-models  # Baixa modelos LLM e embedding
+make up           # Sobe todos os serviços (build + up -d)
 ```
 
+> O container do Ollama executa `infra/ollama/entrypoint.sh`, que **baixa automaticamente** os modelos definidos em `OLLAMA_LLM_MODEL` e `OLLAMA_EMBED_MODEL` na primeira inicialização. O alvo `make pull-models` continua disponível para forçar o download de modelos extras.
+
 ### 3. Execute o pipeline
+
 ```bash
 make pipeline     # ingest → process → embed
+```
+
+Etapas individuais:
+
+```bash
+make ingest       # arXiv API → bucket Bronze
+make process      # Bronze → Silver → Gold
+make embed        # Embeddings + indexação no Milvus
 ```
 
 ### 4. Acesse os serviços
@@ -140,70 +185,227 @@ make pipeline     # ingest → process → embed
 | **Frontend (Gradio)** | http://localhost:7860 | — |
 | **API (FastAPI)** | http://localhost:8000/docs | — |
 | **MLflow** | http://localhost:5000 | — |
-| **MinIO Console** | http://localhost:9001 | minioadmin / minioadmin |
-| **PostgreSQL** | localhost:5432 | raguser / ragpass |
+| **MinIO Console** | http://localhost:9001 | `minioadmin` / `minioadmin` |
+| **Attu (Milvus UI)** | http://localhost:8080 | — |
+| **PostgreSQL** | `localhost:5433` | `raguser` / `ragpass` (db: `ragdb`) |
+| **Milvus (gRPC)** | `localhost:19530` | — |
+| **Ollama** | http://localhost:11435 | — |
 
-### 5. Usando OpenAI como LLM
+### 5. Selecionando o provider de LLM
 
-Para iniciar a integração com a API da OpenAI no projeto, adicione ao seu `.env`:
+Existem três formas, em ordem de prioridade:
+
+1. **Por requisição** — campo `llm_provider` (e opcionalmente `llm_model`) no payload de `POST /query/`.
+2. **Auto-detect** — se apenas `llm_model` for enviado, o provider é inferido pelo nome.
+3. **Padrão global** — variável `LLM_PROVIDER` do `.env` (`ollama`, `huggingface` ou `openai`).
+
+Exemplo via OpenAI:
 
 ```bash
 LLM_PROVIDER=openai
 OPENAI_API_KEY=<sua-chave>
-OPENAI_MODEL=gpt-5.4-mini
+OPENAI_MODEL=gpt-4o-mini
 OPENAI_REASONING_EFFORT=low
+OPENAI_TIMEOUT_SECONDS=120
 ```
 
-Nesta primeira integração, apenas a geração da resposta usa OpenAI. Os embeddings continuam no provider atual para preservar compatibilidade com o índice vetorial já existente.
+> Mesmo no fluxo OpenAI os embeddings continuam sendo gerados pelo HuggingFace (`BAAI/bge-base-en-v1.5`) para preservar compatibilidade com o índice vetorial já existente.
 
 ---
 
 ## 📁 Estrutura do Projeto
 
 ```
-rag-enterprise/
-├── 📄 docker-compose.yml       # Orquestração de todos os serviços
-├── 📄 Makefile                 # Automação de tarefas
-├── 📄 .env.example             # Template de variáveis de ambiente
+awesomeProject/
+├── 📄 docker-compose.yml          # Orquestração de todos os serviços
+├── 📄 Makefile                    # Automação de tarefas
+├── 📄 .env                        # Variáveis de ambiente (NÃO commitar)
+├── 📄 requirements.txt            # Dependências Python (ambiente local/dev)
 │
-├── 📂 api/                     # FastAPI
-│   ├── main.py
-│   ├── core/config.py          # Configurações centralizadas
-│   ├── routers/                # Endpoints HTTP
-│   ├── schemas/                # Modelos Pydantic
-│   ├── services/               # Lógica de negócio
-│   └── middleware/
+├── 📂 api/                        # Backend FastAPI
+│   ├── Dockerfile
+│   ├── main.py                    # Bootstrap FastAPI + CORS + routers
+│   ├── requirements.runtime.txt   # Deps mínimas para o container
+│   ├── core/                      # (placeholder)
+│   ├── routers/
+│   │   └── query.py               # POST /query/  (rota principal RAG)
+│   ├── schemas/
+│   │   ├── config.py              # Settings (pydantic-settings) lendo .env
+│   │   └── query.py               # QueryRequest / QueryResponse / RetrievedDoc
+│   └── services/
+│       ├── rag_service.py         # Orquestrador (roteamento dos providers)
+│       ├── rag_service_ollama.py  # Implementação Ollama (legado/standalone)
+│       ├── rag_huggingface_service.py # Cliente HF Inference API (embed + chat)
+│       ├── openai_service.py      # Cliente OpenAI (Chat Completions)
+│       ├── reranker_service.py    # CrossEncoder local (models/reranker/)
+│       ├── milvus_service.py      # Coleção, índice HNSW e busca vetorial
+│       └── postgres_service.py    # Datasets, versões, runs e auditoria
 │
-├── 📂 pipeline/                # Pipeline RAG
-│   ├── ingestion/ingest.py     # Ingestão do arXiv + persistência local/MinIO
+├── 📂 pipeline/
+│   ├── ingestion/
+│   │   └── ingest.py              # arXiv API → Bronze (local + MinIO)
 │   ├── processing/
-│   │   ├── bronze_to_silver.py # Limpeza e normalização do schema do arXiv
-│   │   └── silver_to_gold.py   # Chunking para indexação
-│   └── embedding/
-│       └── embed_and_index.py  # Embeddings + Milvus
+│   │   ├── bronze_to_silver.py    # Limpeza e normalização do schema arXiv
+│   │   └── silver_to_gold.py      # Chunking (RecursiveCharacterTextSplitter)
+│   ├── embedding/
+│   │   └── embed_and_index.py     # SentenceTransformer + Milvus (idempotente)
+│   └── reranker/
+│       ├── generate_reranker_dataset.py
+│       ├── train_reranker.py
+│       └── upload_reranker_model.py
 │
-├── 📂 frontend/                # Interface Gradio
-│   └── app.py
+├── 📂 frontend/                   # Interface Gradio
+│   ├── Dockerfile
+│   ├── app.py
+│   └── requirements.runtime.txt
 │
-├── 📂 infra/                   # Configurações de infraestrutura
-│   ├── postgres/init.sql       # Schema inicial do banco
-│   └── ollama/entrypoint.sh    # Auto-download de modelos
+├── 📂 infra/
+│   ├── postgres/init.sql          # Schema inicial (datasets, runs, audit_log…)
+│   └── ollama/entrypoint.sh       # Auto-download dos modelos no startup
 │
-├── 📂 tests/                   # Testes
-│   ├── unit/
-│   ├── integration/
-│   └── e2e/
+├── 📂 models/
+│   └── reranker/                  # CrossEncoder local (config + safetensors)
 │
-├── 📂 notebooks/               # Exploração de dados
+├── 📂 data/                       # Saídas locais do pipeline (Bronze/Silver)
+│   ├── bronze/arxiv/raw/
+│   └── silver/exploration/
+│
+├── 📂 tests/
+│   └── test_pipeline.py
+│
+├── 📂 notebooks/
 │   └── 01_dataset_exploration.ipynb
 │
 └── 📂 docs/
-    └── diagrams/architecture.md
+    └── arquitetura.md             # Diagrama Mermaid completo
 ```
 
 ---
 
-## 🔧 Configurando seu Dataset - ArXiv
+## 🔧 Variáveis de Ambiente
+
+Todas configuradas via `.env` na raiz do projeto. Os defaults usados em containers vêm do `docker-compose.yml`.
+
+### MinIO / S3
+
+```bash
+MINIO_ENDPOINT=localhost:9000
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin
+BUCKET_BRONZE=bronze
+BUCKET_SILVER=silver
+BUCKET_GOLD=gold
+```
+
+### PostgreSQL
+
+```bash
+DATABASE_URL=postgresql://raguser:ragpass@localhost:5433/ragdb
+POSTGRES_USER=raguser
+POSTGRES_PASSWORD=ragpass
+POSTGRES_DB=ragdb
+```
+
+### Milvus
+
+```bash
+MILVUS_HOST=localhost
+MILVUS_PORT=19530
+MILVUS_COLLECTION=rag_documents
+```
+
+### Ollama (LLM local)
+
+```bash
+OLLAMA_HOST=http://localhost:11435      # host externo (mapeado para 11434 interno)
+OLLAMA_LLM_MODEL=mistral
+OLLAMA_EMBED_MODEL=nomic-embed-text
+OLLAMA_EMBED_DIMENSION=768
+```
+
+### HuggingFace
+
+```bash
+HUGGINGFACE_API_TOKEN=hf_xxx
+HF_LLM_MODEL=meta-llama/Meta-Llama-3-8B-Instruct
+HF_EMBED_MODEL=BAAI/bge-base-en-v1.5
+```
+
+### OpenAI
+
+```bash
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_REASONING_EFFORT=low             # opcional, modelos GPT-5/o1
+OPENAI_TIMEOUT_SECONDS=120
+```
+
+### Provider padrão
+
+```bash
+LLM_PROVIDER=ollama                     # ollama | huggingface | openai
+```
+
+### MLflow
+
+```bash
+MLFLOW_TRACKING_URI=http://localhost:5000
+MLFLOW_EXPERIMENT_NAME=rag-enterprise
+MLFLOW_S3_ENDPOINT_URL=http://localhost:9000
+MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD=true
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=minioadmin
+```
+
+### Pipeline RAG
+
+```bash
+CHUNK_SIZE=512
+CHUNK_OVERLAP=64
+TOP_K_RETRIEVAL=5
+EMBED_MODEL=BAAI/bge-base-en-v1.5       # usado por pipeline/embedding/embed_and_index.py
+BATCH_SIZE=64
+```
+
+### Dataset (arXiv)
+
+```bash
+DATASET_NAME=arxiv
+DATASET_DOMAIN=research
+DATASET_SOURCE_URL=https://arxiv.org/api/query
+DATASET_VERSION=1.0.0
+```
+
+### Ingestão arXiv
+
+Variáveis lidas por [pipeline/ingestion/ingest.py](pipeline/ingestion/ingest.py):
+
+| Variável | Default | Função |
+|----------|---------|--------|
+| `ARXIV_CATEGORY` | `cs.LG` | Categorias (separadas por vírgula) — combinadas com OR |
+| `ARXIV_MAX_RESULTS` | `10000` | Total de artigos a baixar por execução |
+| `ARXIV_BATCH_SIZE` | `2000` | Tamanho da página da API arXiv (máx. recomendado) |
+| `ARXIV_DELAY_SECONDS` | `3` | Delay entre páginas (recomendado pelo arXiv) |
+| `ARXIV_SORT_BY` | `submittedDate` | Critério de ordenação |
+| `ARXIV_SORT_ORDER` | `descending` | Ordem |
+| `ARXIV_OUTPUT_DIR` | `data/bronze` | Pasta local de saída JSONL |
+| `ARXIV_DATASET_NAME` | `arxiv` | Nome lógico em `rag_datasets` |
+| `ARXIV_WRITE_TO_MINIO` | `true` | Se `false`, salva apenas no disco local |
+| `ARXIV_USER_AGENT` | `awesomeProject/1.0` | User-Agent enviado ao arXiv |
+
+### Frontend (Gradio)
+
+```bash
+API_URL=http://localhost:8000
+GRADIO_SERVER_PORT=7860
+TOP_K_RETRIEVAL=5
+```
+
+> Dentro do `docker-compose`, `API_URL` é sobrescrito para `http://api:8000` automaticamente.
+
+---
+
+## 🔧 Configurando seu Dataset — ArXiv
 
 ### 📋 Dataset: ArXiv Open Access
 
@@ -211,164 +413,248 @@ Este projeto utiliza a **ArXiv Public API** para recuperar artigos científicos.
 
 **Documentação**: https://info.arxiv.org/help/api/index.html
 
-**Categorias disponíveis no ArXiv**:
+**Categorias mais usadas**:
+
 - `cs.AI` — Artificial Intelligence
 - `cs.LG` — Machine Learning
 - `cs.CV` — Computer Vision
-- `cs.NLP` — Natural Language Processing
-- `cs.CL` — Computation and Language
+- `cs.CL` — Computation and Language (NLP)
+- `q-bio.GN` — Genomics
 - `physics.data-an` — Data Analysis
-- `stat.ML` — Statistics Machine Learning
-- E muitas outras...
+- `stat.ML` — Statistics / Machine Learning
 
 ### Passo 1: Defina a categoria de pesquisa
-Edite `.env` e configure:
+
+Edite `.env`:
+
 ```bash
-ARXIV_CATEGORY="cs.LG"  # Exemplo: Machine Learning
-ARXIV_MAX_RESULTS=10000 # Quantidade de artigos para ingestão
-ARXIV_BATCH_SIZE=2000   # Máximo por página da API
-ARXIV_DELAY_SECONDS=3   # Recomendado pelo arXiv para múltiplas chamadas
+ARXIV_CATEGORY="cs.LG"
+ARXIV_MAX_RESULTS=10000
+ARXIV_BATCH_SIZE=2000
+ARXIV_DELAY_SECONDS=3
 DATASET_DOMAIN="Machine Learning Research"
-DATASET_SOURCE_URL="https://export.arxiv.org/api/query"
 ```
 
-### Passo 2: Baixe 10.000 amostras localmente
-Sem depender da infraestrutura completa, você pode salvar a amostra em disco:
+> O arquivo [pipeline/ingestion/ingest.py](pipeline/ingestion/ingest.py) também aceita uma lista interna `CATEGORY_BATCHES` para coletar lotes independentes de categorias em uma mesma execução (ex.: `cs.LG` + `q-bio.GN`).
+
+### Passo 2: Ingestão local sem subir a infra
+
 ```bash
 python -m pipeline.ingestion.ingest \
   --categories cs.LG \
   --max-results 10000 \
   --output-dir data/bronze \
-  --skip-minio
+  --no-write-to-minio
 ```
 
-O arquivo JSONL será salvo em `data/bronze/arxiv/raw/`.
+O JSONL é salvo em `data/bronze/arxiv/raw/`.
 
 ### Passo 3: Explore no notebook
+
 ```bash
 jupyter notebook notebooks/01_dataset_exploration.ipynb
 ```
 
-### Passo 4: Ajustes restantes
-Arquivos que ainda podem ser refinados conforme o domínio do projeto:
+### Passo 4: Ajustes finos
 
-1. **`api/services/rag_service.py`** — Ajustar prompt para contexto científico
-2. **`.env`** — Refinar categorias, volume de ingestão e ordenação da coleta
-3. **`pipeline/embedding/embed_and_index.py`** — Ajustar estratégia de indexação conforme o volume de chunks
-
-### OpenAI no backend
-
-O backend agora aceita seleção de provider para geração de resposta:
-
-- `LLM_PROVIDER=huggingface` mantém o comportamento atual
-- `LLM_PROVIDER=openai` usa `OPENAI_API_KEY` e `OPENAI_MODEL`
-- O endpoint `/query/` retorna também o provider e o modelo efetivamente usados
-
-### Ingestão em volume (Data Lake)
-
-Para puxar mais dados do arXiv sem estourar memória, a ingestão Bronze usa paginação:
-
-- `ARXIV_MAX_RESULTS`: total alvo de registros por execução
-- `ARXIV_PAGE_SIZE`: tamanho de cada página/arquivo bruto
-- `ARXIV_MAX_PAGES`: limite de páginas (`0` = sem limite)
-- `ARXIV_REQUEST_DELAY_SECONDS`: intervalo entre chamadas da API
-- `ARXIV_DEDUP_IN_RUN`: remove IDs duplicados dentro da mesma execução
-- `ARXIV_RETRY_ATTEMPTS`, `ARXIV_RETRY_BACKOFF_SECONDS`, `ARXIV_RETRY_BACKOFF_FACTOR`: resiliência para erro 429/5xx da API
-- `ARXIV_FAIL_FAST`: se `false`, mantém dados já coletados mesmo com falha em uma página
-
-Exemplo de coleta maior:
-
-```bash
-ARXIV_MAX_RESULTS=20000 ARXIV_PAGE_SIZE=200 make ingest
-```
+- **`api/services/rag_service.py`** — `SYSTEM_PROMPT` e `_build_prompt` para contexto científico.
+- **`pipeline/processing/silver_to_gold.py`** — `CHUNK_SIZE` / `CHUNK_OVERLAP` para granularidade dos chunks.
+- **`pipeline/embedding/embed_and_index.py`** — `EMBED_MODEL` e `BATCH_SIZE` conforme volume/hardware.
 
 ---
 
 ## 📋 Comandos Make
 
 ```bash
-make help           # Lista todos os comandos
-make up             # Sobe todos os serviços
-make down           # Para serviços
-make restart        # Reinicia
-make logs           # Logs de todos os serviços
-make logs-api       # Logs de um serviço específico
-make status         # Status dos containers
+make help            # Lista todos os comandos
+make up              # Sobe todos os serviços
+make down            # Para serviços
+make restart         # Reinicia
+make build           # Rebuild sem cache
+make logs            # Logs de todos os serviços
+make logs-api        # Logs do serviço api (use logs-<serviço>)
+make status          # Status dos containers
+make infra-up        # Sobe apenas infraestrutura (sem api/frontend)
+make infra-down      # Para apenas infraestrutura
 
-make pull-models    # Baixa modelos Ollama
-make pipeline       # Executa pipeline completo
-make ingest         # Apenas ingestão Bronze
-make process        # Bronze → Silver → Gold
-make embed          # Embedding + indexação Milvus
+make pull-models     # Força download de modelos Ollama (llama3.2 + nomic-embed-text)
+make list-models     # Lista modelos disponíveis no container Ollama
 
-make db-migrate     # Aplica migrações PostgreSQL
-make db-shell       # Shell interativo do banco
+make pipeline        # Executa pipeline completo (ingest → process → embed)
+make ingest          # Apenas ingestão Bronze
+make process         # Bronze → Silver → Gold
+make embed           # Embedding + indexação Milvus
 
-make test           # Todos os testes
-make test-unit      # Testes unitários
-make lint           # Linter (ruff)
-make format         # Formatter (black + ruff)
+make db-migrate      # alembic upgrade head (caso existam migrations)
+make db-rollback     # alembic downgrade -1
+make db-shell        # Shell interativo do PostgreSQL
 
-make open-all       # Lista URLs de todos os serviços
-make clean          # Remove containers e volumes
+make test            # Todos os testes
+make test-unit       # Testes unitários
+make test-integration
+make test-e2e
+make test-cov        # Testes com cobertura HTML
+
+make lint            # Linter (ruff)
+make format          # Formatter (ruff format + black)
+
+make mlflow-ui       # Abre MLflow no navegador
+make open-all        # Lista URLs de todos os serviços
+make clean           # Remove containers, volumes e imagens órfãs
 ```
+
+> ⚠️ O alvo `make env` espera um `.env.example`. Caso não exista, crie o `.env` manualmente (ver [Variáveis de Ambiente](#-variáveis-de-ambiente)).
 
 ---
 
 ## 🔄 Fluxo do Pipeline RAG
 
+### Pipeline de dados (offline)
+
 ```
-Query do usuário
-     │
-     ▼
-Embedding da query (Ollama: nomic-embed-text)
-     │
-     ▼
-Busca vetorial (Milvus: top-k por COSINE similarity)
-     │
-     ▼
-Construção do prompt (context + query)
-     │
-     ▼
-Geração (Ollama: llama3.2)
-     │
-     ▼
-Log MLflow + Persistência PostgreSQL
-     │
-     ▼
-Resposta ao usuário
+arXiv API
+   │  pipeline/ingestion/ingest.py
+   ▼
+Bronze (MinIO + data/bronze/)        — JSONL bruto
+   │  pipeline/processing/bronze_to_silver.py
+   ▼
+Silver                               — abstracts limpos + metadados
+   │  pipeline/processing/silver_to_gold.py
+   ▼
+Gold                                 — chunks (CHUNK_SIZE/OVERLAP)
+   │  pipeline/embedding/embed_and_index.py
+   ▼
+Milvus (rag_documents, HNSW/COSINE) + PostgreSQL (data_files, documents)
+```
+
+### Pipeline de query (online)
+
+```
+Query do usuário (Gradio → POST /query/)
+   │
+   ▼
+Embedding da query
+   ├── ollama       → nomic-embed-text (local)
+   └── hf / openai  → BAAI/bge-base-en-v1.5 (HF Inference)
+   │
+   ▼
+Busca vetorial (Milvus, top-k por COSINE)
+   │
+   ▼
+[somente HF]  Reranker CrossEncoder local (top-k → top-3)
+   │
+   ▼
+Construção do prompt (SYSTEM_PROMPT + contexto + query)
+   │
+   ▼
+Geração
+   ├── ollama       → ollama.Client.chat (OLLAMA_LLM_MODEL)
+   ├── huggingface  → InferenceClient.chat_completion (HF_LLM_MODEL)
+   └── openai       → OpenAI Chat Completions (OPENAI_MODEL)
+   │
+   ▼
+Logging MLflow + persistência PostgreSQL (rag_runs + audit_log)
+   │
+   ▼
+QueryResponse (answer, retrieved_docs, latency_ms, run_id, mlflow_run_id…)
 ```
 
 ---
 
-## 📊 MLOps
+## 🗃️ Schema PostgreSQL
 
-Cada query RAG é automaticamente registrada no MLflow com:
-- Parâmetros: modelo LLM, embed model, top-k, query
-- Métricas: latência, número de docs recuperados
-- Artefatos: prompt usado, resposta gerada
+Inicializado automaticamente por [infra/postgres/init.sql](infra/postgres/init.sql).
 
-Acesse: http://localhost:5000
+| Tabela | Função |
+|--------|--------|
+| `rag_datasets` | Datasets lógicos (nome, domínio, source URL, versão) |
+| `rag_dataset_versions` | Histórico de versões por dataset |
+| `data_files` | Rastreio de arquivos por camada Medallion (bronze/silver/gold) com `status` e `checksum` |
+| `documents` | Vínculo chunk ↔ embedding (`milvus_id`, `embed_model`, `metadata`) |
+| `rag_runs` | Cada execução de query RAG (query, prompt, resposta, latência, top-k, feedback) |
+| `audit_log` | Eventos auditáveis em formato JSONB |
+
+---
+
+## 📊 MLOps — MLflow
+
+Cada query RAG registra automaticamente em MLflow:
+
+- **Parâmetros**: `query`, `top_k`, `llm_model`, `embed_model`, `llm_provider`, `reranker_used`, prévias do prompt e da resposta.
+- **Métricas**: `latency_ms`, `prompt_tokens`, `response_tokens`, `total_tokens`, `docs_retrieved` (e `docs_before_rerank` / `docs_after_rerank` no fluxo HF).
+- **Artefatos**: tabela JSON com os documentos recuperados (resumo) e o JSON completo (`docs_*_full`).
+
+UI: http://localhost:5000
+
+---
+
+## 🌐 API HTTP
+
+### `POST /query/`
+
+```jsonc
+// Request
+{
+  "query": "What are recent advances in retrieval-augmented generation?",
+  "top_k": 5,
+  "llm_model": "gpt-4o-mini",        // opcional
+  "llm_provider": "openai"            // opcional — ollama | huggingface | openai
+}
+```
+
+```jsonc
+// Response (QueryResponse)
+{
+  "run_id": "…",
+  "query": "…",
+  "answer": "…",
+  "retrieved_docs": [
+    {
+      "score": 0.81,
+      "title": "…",
+      "url": "…",
+      "arxiv_id": "2401.01234",
+      "authors": "…",
+      "categories": "cs.CL cs.AI",
+      "primary_category": "cs.CL",
+      "content": "…",
+      "published": "…",
+      "updated": "…"
+    }
+  ],
+  "llm_provider": "openai",
+  "llm_model": "gpt-4o-mini",
+  "latency_ms": 2840,
+  "mlflow_run_id": "…"
+}
+```
+
+Documentação interativa em http://localhost:8000/docs.
 
 ---
 
 ## 🧪 Testes
 
 ```bash
-make test           # Todos os testes com coverage
-make test-unit      # Apenas unitários (sem infra necessária)
-make test-integration  # Requer serviços rodando
+make test              # Todos os testes
+make test-unit         # Apenas unitários
+make test-integration  # Requer infra rodando
+make test-cov          # Cobertura HTML
 ```
+
+> Atualmente o repositório contém [tests/test_pipeline.py](tests/test_pipeline.py); as estruturas `tests/unit`, `tests/integration` e `tests/e2e` estão previstas no Makefile mas ainda não populadas.
 
 ---
 
 ## 🐛 Troubleshooting
 
-**Ollama sem GPU**: Remova o bloco `deploy.resources` do `docker-compose.yml` na seção `ollama`.
-
-**Milvus não sobe**: Verifique se o etcd e minio estão saudáveis primeiro com `make status`.
-
-**Modelos lentos**: Use modelos menores como `phi3` ou `tinyllama` no `.env`.
+- **Ollama sem GPU**: o `docker-compose.yml` atual já não declara `deploy.resources` para o Ollama — ele roda em CPU por padrão. Para acelerar, adicione um bloco `deploy.resources.reservations.devices` apontando para a GPU.
+- **Milvus não sobe**: verifique se `etcd` e `minio` estão saudáveis primeiro (`make status`). Milvus depende de ambos.
+- **Modelos Ollama lentos**: use modelos menores (`phi3`, `tinyllama`, `llama3.2:1b`) ajustando `OLLAMA_LLM_MODEL` no `.env`.
+- **`OPENAI_API_KEY não configurada`**: defina a chave no `.env` antes de selecionar `LLM_PROVIDER=openai`.
+- **Erro 429 / quota OpenAI**: o endpoint `/query/` traduz para HTTP 429 com mensagem orientando a verificar o billing em https://platform.openai.com/account/billing/overview.
+- **Reranker desabilitado**: se `sentence-transformers` não estiver instalado ou `models/reranker/` não existir, o `RerankerService` apenas retorna `docs[:top_k]` sem reordenação — o pipeline continua funcionando normalmente.
+- **`make env` falha**: este projeto não distribui `.env.example`; crie o `.env` manualmente com base em [Variáveis de Ambiente](#-variáveis-de-ambiente).
 
 ---
 
@@ -378,7 +664,7 @@ make test-integration  # Requer serviços rodando
 |-------|-----------|-------------|
 | **Product Owner (PO)** | Define requisitos, prioriza backlog, valida entregas | Eduardo Weber Maldaner |
 | **Scrum Master** | Facilita cerimônias, remove impedimentos, protege o time | Eduardo Weber Maldaner |
-| **Developer** | Implementa features, garante qualidade, autoorganizado | Lucas Carmargo, Jeferson |
+| **Developer** | Implementa features, garante qualidade, autoorganizado | Lucas Carmargo, Jeferson, Wallace, Heifor, Nicola, Arthur |
 
 ### Cerimônias
 
@@ -387,11 +673,6 @@ make test-integration  # Requer serviços rodando
 - **Daily**: Terça-Sexta (09:00) — Sincronização rápida
 - **Review**: Segundas fim de sprint (14:00) — Demonstra entregáveis
 - **Retrospectiva**: Segundas fim de sprint (15:00) — Melhoria contínua
-
-### Objetivo do Sprint 1
-
-✅ Completar épico **BS** (Definição de Escopo e Requisitos)
-✅ Iniciar integração com ArXiv API (**AX-1**, **AX-2**)
 
 ---
 
@@ -403,3 +684,6 @@ make test-integration  # Requer serviços rodando
 - [MLflow Docs](https://mlflow.org/docs/latest)
 - [FastAPI Docs](https://fastapi.tiangolo.com)
 - [MinIO Docs](https://min.io/docs)
+- [HuggingFace Inference API](https://huggingface.co/docs/api-inference/index)
+- [OpenAI API](https://platform.openai.com/docs/api-reference)
+- [Sentence-Transformers / CrossEncoder](https://www.sbert.net/examples/applications/cross-encoder/README.html)
