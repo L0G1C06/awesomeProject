@@ -11,9 +11,76 @@ load_dotenv()
 
 API_URL       = os.getenv("API_URL", "http://localhost:8001")
 HF_MODEL      = os.getenv("HF_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
+LLM_PROVIDER  = os.getenv("LLM_PROVIDER", "huggingface").lower()
+OLLAMA_MODEL  = os.getenv("OLLAMA_LLM_MODEL", "mistral")
+OPENAI_MODEL  = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+ACTIVE_MODEL  = OPENAI_MODEL if LLM_PROVIDER == "openai" else HF_MODEL
+GRADIO_PORT   = int(os.getenv("GRADIO_SERVER_PORT", "7860"))
 TOP_K_DEFAULT = int(os.getenv("TOP_K_RETRIEVAL", 5))
 TOP_K_MIN     = 1
-TOP_K_MAX     = 20  # atualizado para refletir o novo limite da API (ge=1, le=20)
+TOP_K_MAX     = 20
+
+# ── Modelos disponíveis ────────────────────────────────────────────────────────
+# Modelos Ollama (locais, rodando em container)
+OLLAMA_MODELS = list(dict.fromkeys([
+    OLLAMA_MODEL,
+    "llama3.2",
+    "mistral",
+]))
+
+# Modelos HuggingFace (via API remota)
+HUGGINGFACE_MODELS = [
+    "meta-llama/Meta-Llama-3-8B-Instruct",
+]
+
+# Modelos OpenAI (via API)
+OPENAI_MODELS = [
+    "gpt-5.4-mini"
+]
+
+# Combina os modelos com rótulos visuais para distinguir
+AVAILABLE_MODELS = (
+    [f"🔵 {m} [ollama]" for m in OLLAMA_MODELS] +
+    [f"🟠 {m} [huggingface]" for m in HUGGINGFACE_MODELS] +
+    [f"🔴 {m} [openai]" for m in OPENAI_MODELS]
+)
+
+# Garante que o modelo padrão do .env esteja na lista
+DEFAULT_DISPLAY = None
+if OLLAMA_MODEL and LLM_PROVIDER == "ollama":
+    for model in AVAILABLE_MODELS:
+        if OLLAMA_MODEL in model:
+            DEFAULT_DISPLAY = model
+            break
+    else:
+        DEFAULT_DISPLAY = f"🔵 {OLLAMA_MODEL} [ollama]"
+        AVAILABLE_MODELS.insert(0, DEFAULT_DISPLAY)
+elif OPENAI_MODEL and LLM_PROVIDER == "openai":
+    for model in AVAILABLE_MODELS:
+        if OPENAI_MODEL in model:
+            DEFAULT_DISPLAY = model
+            break
+    else:
+        if OPENAI_MODEL.startswith("gpt"):
+            DEFAULT_DISPLAY = f"🔴 {OPENAI_MODEL} [openai]"
+elif HF_MODEL:
+    for model in AVAILABLE_MODELS:
+        if HF_MODEL in model:
+            DEFAULT_DISPLAY = model
+            break
+    else:
+        # Se não encontrando, adiciona com a marcação correta
+        if "/" in HF_MODEL:
+            # É um modelo HuggingFace
+            DEFAULT_DISPLAY = f"🟠 {HF_MODEL} [huggingface]"
+            AVAILABLE_MODELS.insert(0, DEFAULT_DISPLAY)
+        else:
+            # É um modelo Ollama
+            DEFAULT_DISPLAY = f"🔵 {HF_MODEL} [ollama]"
+            AVAILABLE_MODELS.insert(0, DEFAULT_DISPLAY)
+
+if not DEFAULT_DISPLAY:
+    DEFAULT_DISPLAY = AVAILABLE_MODELS[0] if AVAILABLE_MODELS else HF_MODEL
 
 # ── CSS ────────────────────────────────────────────────────────────────────────
 CSS = """
@@ -50,6 +117,16 @@ label > span { font-size: 0.75rem !important; font-weight: 500 !important; color
 .top-k-wrap input[type=number]:focus { border-color: #388bfd !important; outline: none !important; }
 .validation-error { font-size: 0.76rem !important; color: #f85149 !important; min-height: 1rem; margin-top: 0.2rem; }
 
+/* ── Model selector dropdown ── */
+.model-selector-wrap .wrap { background: #161b22 !important; border: 1px solid #30363d !important; border-radius: 8px !important; transition: border-color 0.15s; }
+.model-selector-wrap .wrap:focus-within { border-color: #388bfd !important; box-shadow: 0 0 0 3px rgba(56,139,253,.15) !important; }
+.model-selector-wrap input { background: transparent !important; border: none !important; color: #c9d1d9 !important; font-size: 0.86rem !important; font-family: 'DM Mono', monospace !important; }
+.model-selector-wrap svg { color: #6e7681 !important; }
+.model-selector-wrap ul { background: #161b22 !important; border: 1px solid #30363d !important; border-radius: 8px !important; margin-top: 4px !important; z-index: 100 !important; }
+.model-selector-wrap ul li { color: #c9d1d9 !important; font-size: 0.84rem !important; font-family: 'DM Mono', monospace !important; padding: 0.5rem 0.9rem !important; }
+.model-selector-wrap ul li:hover { background: #21262d !important; color: #f0f6fc !important; }
+.model-selector-wrap ul li.selected { background: #1f3a5f !important; color: #79c0ff !important; }
+
 /* ── Submit button ── */
 .submit-btn > button {
     background: #238636 !important; border: 1px solid #2ea043 !important; border-radius: 8px !important;
@@ -60,10 +137,6 @@ label > span { font-size: 0.75rem !important; font-weight: 500 !important; color
 .submit-btn > button:hover   { background: #2ea043 !important; }
 .submit-btn > button:active  { transform: scale(0.985) !important; }
 .submit-btn > button:disabled { background: #161b22 !important; color: #484f58 !important; border-color: #21262d !important; cursor: not-allowed !important; }
-
-/* ── Model badge ── */
-.model-badge { background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 0.45rem 0.75rem; font-size: 0.76rem; color: #6e7681; margin-top: 0.6rem; }
-.model-badge code { font-family: 'DM Mono', monospace !important; color: #79c0ff !important; font-size: 0.76rem !important; }
 
 /* ── Run meta bar ── */
 .run-meta { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 0.55rem 1rem;
@@ -110,13 +183,38 @@ def validate_top_k(value) -> tuple[int, str]:
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+def _extract_model_name(display_name: str) -> str:
+    """
+    Extrai o nome real do modelo e provider a partir do nome formatado.
+    Ex: "🔵 llama2 [ollama]" → ("llama2", "ollama")
+    Ex: "🟠 meta-llama/Meta-Llama-3-8B-Instruct [huggingface]" → ("meta-llama/Meta-Llama-3-8B-Instruct", "huggingface")
+    Ex: "🔴 gpt-4 [openai]" → ("gpt-4", "openai")
+    """
+    if not display_name:
+        return None, None
+    
+    # Remove o emoji no início (3-4 bytes dependendo do emoji)
+    name = display_name
+    for emoji in ["🔵", "🟠", "🔴"]:
+        if name.startswith(emoji + " "):
+            name = name[2:].lstrip()
+            break
+    
+    # Extrai o provider entre colchetes [provider]
+    provider = None
+    if "[" in name and "]" in name:
+        model_part, provider_part = name.rsplit("[", 1)
+        provider = provider_part.rstrip("]").strip()
+        name = model_part.strip()
+    
+    return name, provider
+
+
 def _pill(text: str) -> str:
-    """Formata uma string como pill/tag inline."""
     return f'<span class="pill">{text}</span>'
 
 
 def _format_doc(i: int, doc: dict, total: int) -> str:
-    """Renderiza um RetrievedDoc em Markdown."""
     score            = doc.get("score", 0)
     title            = doc.get("title") or f"Documento {i}"
     authors          = doc.get("authors")
@@ -130,29 +228,25 @@ def _format_doc(i: int, doc: dict, total: int) -> str:
 
     lines: list[str] = []
 
-    # ── Título ──
     if url:
         lines.append(f"**[{title}]({url})**")
     else:
         lines.append(f"**{title}**")
 
-    # ── Linha de metadados principais ──
     meta_parts = [f"Relevância `{score:.3f}`"]
     if primary_category:
         meta_parts.append(f"Categoria primária `{primary_category}`")
     if published:
-        meta_parts.append(f"Publicado: {published[:10]}")   # só a data, sem hora
+        meta_parts.append(f"Publicado: {published[:10]}")
     if updated and updated != published:
         meta_parts.append(f"Atualizado: {updated[:10]}")
     lines.append(" &nbsp;·&nbsp; ".join(meta_parts))
     lines.append("")
 
-    # ── Autores ──
     if authors:
         lines.append(f"*{authors}*")
         lines.append("")
 
-    # ── Categorias como pills ──
     if categories:
         cats = [c.strip() for c in categories.split() if c.strip()]
         if cats:
@@ -160,7 +254,6 @@ def _format_doc(i: int, doc: dict, total: int) -> str:
             lines.append(pills)
             lines.append("")
 
-    # ── IDs / links extras ──
     ids: list[str] = []
     if arxiv_id:
         ids.append(f"arXiv: `{arxiv_id}`")
@@ -168,7 +261,6 @@ def _format_doc(i: int, doc: dict, total: int) -> str:
         lines.append(" &nbsp;·&nbsp; ".join(ids))
         lines.append("")
 
-    # ── Trecho do conteúdo ──
     lines.append(content)
 
     if i < total:
@@ -180,7 +272,7 @@ def _format_doc(i: int, doc: dict, total: int) -> str:
 
 
 # ── Query ──────────────────────────────────────────────────────────────────────
-def query_rag(question: str, top_k_raw) -> tuple[str, str, str, object]:
+def query_rag(question: str, top_k_raw, selected_model: str) -> tuple[str, str, str, object]:
     """Retorna: (answer_md, run_meta_html, docs_md, accordion_state)."""
     empty_meta = ""
 
@@ -194,27 +286,41 @@ def query_rag(question: str, top_k_raw) -> tuple[str, str, str, object]:
 
     top_k, _ = validate_top_k(top_k_raw)
 
+    # Extrai o nome real do modelo e provider a partir da exibição formatada
+    model_to_use, provider_to_use = _extract_model_name(selected_model) if selected_model else (HF_MODEL, LLM_PROVIDER)
+    
+    if not model_to_use:
+        model_to_use = HF_MODEL
+    if not provider_to_use:
+        provider_to_use = LLM_PROVIDER
+
     try:
         with httpx.Client(timeout=120.0) as client:
             response = client.post(
                 f"{API_URL}/query/",
-                json={"query": question, "top_k": top_k},
+                json={
+                    "query": question,
+                    "top_k": top_k,
+                    "llm_model": model_to_use,
+                    "llm_provider": provider_to_use,
+                },
             )
             response.raise_for_status()
             data = response.json()
 
         # ── Campos de QueryResponse ──
-        answer       = data.get("answer", "")          # mantido por compatibilidade futura
+        answer       = data.get("answer", "")
         latency      = data.get("latency_ms", 0)
-        model        = data.get("llm_model", HF_MODEL)
+        provider     = data.get("llm_provider", provider_to_use)
+        model        = data.get("llm_model", model_to_use)
         docs         = data.get("retrieved_docs", [])
         run_id       = data.get("run_id", "")
         mlflow_run   = data.get("mlflow_run_id")
 
         n = len(docs)
 
-        # ── Barra de metadados da run ──
         meta_parts = [
+            f"<span><strong>Provider</strong> &nbsp;<code>{provider}</code></span>",
             f"<span><strong>Modelo</strong> &nbsp;<code>{model}</code></span>",
             f"<span><strong>Latência</strong> &nbsp;<code>{latency} ms</code></span>",
             f"<span><strong>Docs recuperados</strong> &nbsp;<code>{n}</code></span>",
@@ -226,7 +332,6 @@ def query_rag(question: str, top_k_raw) -> tuple[str, str, str, object]:
 
         run_meta_html = '<div class="run-meta">' + "".join(meta_parts) + "</div>"
 
-        # ── Documentos ──
         docs_md = "\n".join(_format_doc(i, doc, n) for i, doc in enumerate(docs, 1))
 
         return answer, run_meta_html, docs_md, gr.Accordion(open=True)
@@ -246,7 +351,7 @@ def query_rag(question: str, top_k_raw) -> tuple[str, str, str, object]:
 
 
 # ── Layout ─────────────────────────────────────────────────────────────────────
-with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
+with gr.Blocks(title="Buscador de Documentos Científicos") as demo:
 
     gr.HTML("""
         <div class="rag-header">
@@ -265,6 +370,16 @@ with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
                 max_lines=10,
             )
 
+            # ── Seletor de modelo ──────────────────────────────────────────────
+            model_dropdown = gr.Dropdown(
+                label="Modelo de linguagem",
+                info="🔵 Modelos locais (Ollama) | 🟠 Modelos remostos (HuggingFace) | 🔴 Modelos OpenAI",
+                choices=AVAILABLE_MODELS,
+                value=DEFAULT_DISPLAY,
+                allow_custom_value=True,   # permite digitar um HF model ID customizado
+                elem_classes=["model-selector-wrap"],
+            )
+
             top_k_input = gr.Number(
                 label=f"Documentos a recuperar  (mín. {TOP_K_MIN} · máx. {TOP_K_MAX})",
                 value=TOP_K_DEFAULT,
@@ -273,12 +388,9 @@ with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
             )
             validation_msg = gr.Markdown(value="", elem_classes=["validation-error"])
 
-            gr.HTML(f'<div class="model-badge">Modelo ativo &nbsp;·&nbsp; <code>{HF_MODEL}</code></div>')
-
             submit_btn = gr.Button("Consultar", variant="primary", elem_classes=["submit-btn"])
 
         with gr.Column(scale=3):
-            # Barra de metadados da run (run_id, mlflow_run_id, latência, modelo, n_docs)
             run_meta_output = gr.HTML(value="")
 
             answer_output = gr.Markdown(
@@ -307,7 +419,7 @@ with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
     for trigger in (submit_btn.click, question_input.submit):
         trigger(
             fn=query_rag,
-            inputs=[question_input, top_k_input],
+            inputs=[question_input, top_k_input, model_dropdown],  # model_dropdown adicionado
             outputs=[answer_output, run_meta_output, docs_output, docs_accordion],
         )
 
@@ -315,6 +427,7 @@ with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
 if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0",
-        server_port=7860,
+        server_port=GRADIO_PORT,
         share=False,
+        css=CSS,
     )

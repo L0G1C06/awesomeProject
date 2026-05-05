@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic-settings
+loguru
+pymilvus
+sqlalchemy
+psycopg2-binary
+mlflow==2.13.0
+boto3
+huggingface_hub
+openai
+ollama

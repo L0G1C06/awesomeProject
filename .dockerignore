@@ -1,0 +1,13 @@
+.git
+.codex
+.env
+.venv
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+data/
+models/
+notebooks/
+*.pyc
+*.pyo
+*.safetensors

@@ -143,6 +143,19 @@ make pipeline     # ingest → process → embed
 | **MinIO Console** | http://localhost:9001 | minioadmin / minioadmin |
 | **PostgreSQL** | localhost:5432 | raguser / ragpass |
 
+### 5. Usando OpenAI como LLM
+
+Para iniciar a integração com a API da OpenAI no projeto, adicione ao seu `.env`:
+
+```bash
+LLM_PROVIDER=openai
+OPENAI_API_KEY=<sua-chave>
+OPENAI_MODEL=gpt-5.4-mini
+OPENAI_REASONING_EFFORT=low
+```
+
+Nesta primeira integração, apenas a geração da resposta usa OpenAI. Os embeddings continuam no provider atual para preservar compatibilidade com o índice vetorial já existente.
+
 ---
 
 ## 📁 Estrutura do Projeto
@@ -242,6 +255,14 @@ Arquivos que ainda podem ser refinados conforme o domínio do projeto:
 1. **`api/services/rag_service.py`** — Ajustar prompt para contexto científico
 2. **`.env`** — Refinar categorias, volume de ingestão e ordenação da coleta
 3. **`pipeline/embedding/embed_and_index.py`** — Ajustar estratégia de indexação conforme o volume de chunks
+
+### OpenAI no backend
+
+O backend agora aceita seleção de provider para geração de resposta:
+
+- `LLM_PROVIDER=huggingface` mantém o comportamento atual
+- `LLM_PROVIDER=openai` usa `OPENAI_API_KEY` e `OPENAI_MODEL`
+- O endpoint `/query/` retorna também o provider e o modelo efetivamente usados
 
 ### Ingestão em volume (Data Lake)
 

@@ -7,6 +7,11 @@ from pydantic import BaseModel, Field
 class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1)
     top_k: int = Field(default=5, ge=1, le=20)
+    llm_model: Optional[str] = Field(default=None, description="Modelo LLM a usar (Ollama ou HuggingFace)")
+    llm_provider: Optional[str] = Field(
+        default=None,
+        description="Provider do LLM: 'openai', 'huggingface' ou 'ollama'. Se None, detecta pelo modelo."
+    )
 
 
 class RetrievedDoc(BaseModel):
@@ -24,7 +29,10 @@ class RetrievedDoc(BaseModel):
 
 class QueryResponse(BaseModel):
     run_id: str
+    query: str
+    answer: str = Field(default="", description="Resposta gerada pelo LLM")
     retrieved_docs: list[RetrievedDoc] = Field(default_factory=list)
+    llm_provider: str
     llm_model: str
     latency_ms: int
     mlflow_run_id: str | None = None

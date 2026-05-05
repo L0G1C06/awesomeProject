@@ -137,13 +137,22 @@ services:
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     networks:
       - rag_network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+
+  # ─────────────────────────────────────────
+  # LLM LOCAL — Ollama
+  # ─────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag_ollama
+    restart: unless-stopped
+    ports:
+      - "11435:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./infra/ollama/entrypoint.sh:/entrypoint.sh
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    networks:
+      - rag_network
 
   # ─────────────────────────────────────────
   # MLOPS — MLflow
@@ -177,8 +186,8 @@ services:
   # ─────────────────────────────────────────
   api:
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
     container_name: rag_api
     restart: unless-stopped
     ports:
@@ -186,18 +195,24 @@ services:
     env_file:
       - .env
     environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-raguser}:${POSTGRES_PASSWORD:-ragpass}@postgres:5432/${POSTGRES_DB:-ragdb}
       POSTGRES_HOST: postgres
       MILVUS_HOST: milvus
       MINIO_ENDPOINT: minio:9000
       OLLAMA_HOST: http://ollama:11434
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
     depends_on:
       postgres:
         condition: service_healthy
       milvus:
         condition: service_healthy
+      mlflow:
+        condition: service_started
     volumes:
-      - ./api:/app
+      - ./:/app
     networks:
       - rag_network
 
@@ -214,6 +229,10 @@ services:
       - "7860:7860"
     environment:
       API_URL: http://api:8000
+      LLM_PROVIDER: ollama
+      OLLAMA_LLM_MODEL: mistral
+      GRADIO_SERVER_NAME: 0.0.0.0
+      GRADIO_SERVER_PORT: 7860
     depends_on:
       - api
     networks:
