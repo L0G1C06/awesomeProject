@@ -92,7 +92,6 @@ matplotlib
 mdurl
 milvus-lite
 minio
-mlflow
 mpmath
 multidict
 multiprocess

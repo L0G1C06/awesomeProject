@@ -358,7 +358,6 @@ class PostgresService:
     def save_rag_run_sync(
         self,
         run_id: str,
-        mlflow_run_id: str,
         query: str,
         retrieved_docs: list[dict],
         prompt_used: str,
@@ -374,10 +373,10 @@ class PostgresService:
                 text(
                     """
                     INSERT INTO rag_runs (
-                        id, mlflow_run_id, query, retrieved_docs, prompt_used,
+                        id, query, retrieved_docs, prompt_used,
                         response, llm_model, embed_model, top_k, latency_ms
                     ) VALUES (
-                        :id, :mlflow_run_id, :query, CAST(:retrieved_docs AS JSONB), :prompt_used,
+                        :id, :query, CAST(:retrieved_docs AS JSONB), :prompt_used,
                         :response, :llm_model, :embed_model, :top_k, :latency_ms
                     )
                     ON CONFLICT (id) DO NOTHING
@@ -385,7 +384,6 @@ class PostgresService:
                 ),
                 {
                     "id": run_uuid,
-                    "mlflow_run_id": mlflow_run_id,
                     "query": query,
                     "retrieved_docs": json.dumps(retrieved_docs, ensure_ascii=False),
                     "prompt_used": prompt_used,
@@ -402,7 +400,6 @@ class PostgresService:
             entity_id=run_uuid,
             action="query_executed",
             details={
-                "mlflow_run_id": mlflow_run_id,
                 "llm_model": llm_model,
                 "top_k": top_k,
                 "latency_ms": latency_ms,
@@ -413,7 +410,6 @@ class PostgresService:
     async def save_rag_run(
         self,
         run_id: str,
-        mlflow_run_id: str,
         query: str,
         retrieved_docs: list[dict],
         prompt_used: str,
@@ -426,7 +422,6 @@ class PostgresService:
         await asyncio.to_thread(
             self.save_rag_run_sync,
             run_id,
-            mlflow_run_id,
             query,
             retrieved_docs,
             prompt_used,

@@ -12,6 +12,10 @@ class QueryRequest(BaseModel):
         default=None,
         description="Provider do LLM: 'openai', 'huggingface' ou 'ollama'. Se None, detecta pelo modelo."
     )
+    filter_category: Optional[str] = Field(default=None, description="Filtrar por categoria arXiv (ex: cs.LG)")
+    filter_author: Optional[str] = Field(default=None, description="Filtrar por nome de autor")
+    filter_date_from: Optional[str] = Field(default=None, description="Data inicial (YYYY-MM-DD)")
+    filter_date_to: Optional[str] = Field(default=None, description="Data final (YYYY-MM-DD)")
 
 
 class RetrievedDoc(BaseModel):
@@ -35,4 +39,3 @@ class QueryResponse(BaseModel):
     llm_provider: str
     llm_model: str
     latency_ms: int
-    mlflow_run_id: str | None = None

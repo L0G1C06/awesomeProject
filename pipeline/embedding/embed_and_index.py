@@ -11,8 +11,6 @@ import sys
 
 from loguru import logger
 from minio import Minio
-import mlflow
-
 from sentence_transformers import SentenceTransformer
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
@@ -29,7 +27,6 @@ BUCKET = "gold"
 GOLD_PREFIX = os.getenv("GOLD_PREFIX", "")  # "" = todos os datasets
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-base-en-v1.5")
-MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", 256))
 
 DATASET_NAME = os.getenv("DATASET_NAME", "arxiv")
@@ -102,126 +99,113 @@ def get_indexed_object_keys(db: PostgresService, dataset_id: str) -> set[str]:
 def run() -> None:
     logger.info("=== Embedding & Indexação iniciada ===")
 
-    mlflow.set_tracking_uri(MLFLOW_URI)
-    mlflow.set_experiment("rag-enterprise-indexing")
+    client = get_minio_client()
+    milvus = MilvusService()
+    db = PostgresService()
 
-    with mlflow.start_run(run_name="embed-and-index"):
+    dataset_id = db.ensure_dataset(
+        name=DATASET_NAME,
+        domain=DATASET_DOMAIN,
+        source_url=DATASET_SOURCE_URL,
+        version=DATASET_VERSION,
+        description=f"Dataset {DATASET_NAME} indexado no Milvus",
+    )
 
-        client = get_minio_client()
-        milvus = MilvusService()
-        db = PostgresService()
+    already_indexed = get_indexed_object_keys(db, dataset_id)
+    logger.info("{} arquivo(s) já indexado(s) serão ignorados.", len(already_indexed))
 
-        dataset_id = db.ensure_dataset(
-            name=DATASET_NAME,
-            domain=DATASET_DOMAIN,
-            source_url=DATASET_SOURCE_URL,
-            version=DATASET_VERSION,
-            description=f"Dataset {DATASET_NAME} indexado no Milvus",
+    gold_files = list_gold_files(client, prefix=GOLD_PREFIX)
+    logger.info("{} arquivo(s) Gold encontrado(s).", len(gold_files))
+
+    total_files = 0
+    total_skipped = 0
+    total_indexed = 0
+
+    for object_name in gold_files:
+
+        if object_name in already_indexed:
+            logger.info("Pulando (já indexado): {}", object_name)
+            total_skipped += 1
+            continue
+
+        logger.info("Processando {}", object_name)
+
+        response = client.get_object(BUCKET, object_name)
+        chunks = list(stream_jsonl(response))
+        response.close()
+
+        if not chunks:
+            logger.warning("Nenhum chunk em {}", object_name)
+            continue
+
+        data_file_id = db.register_data_file(
+            dataset_id=dataset_id,
+            layer="gold",
+            bucket=BUCKET,
+            object_key=object_name,
+            row_count=len(chunks),
+            size_bytes=None,
+            checksum=None,
+            status="done",
         )
 
-        already_indexed = get_indexed_object_keys(db, dataset_id)
-        logger.info("{} arquivo(s) já indexado(s) serão ignorados.", len(already_indexed))
+        logger.info("{} chunks carregados de {}", len(chunks), object_name)
 
-        gold_files = list_gold_files(client, prefix=GOLD_PREFIX)
-        logger.info("{} arquivo(s) Gold encontrado(s).", len(gold_files))
+        for i in range(0, len(chunks), BATCH_SIZE):
 
-        total_files = 0
-        total_skipped = 0
-        total_indexed = 0
+            batch = chunks[i:i + BATCH_SIZE]
 
-        for object_name in gold_files:
+            texts = [
+                f"{c.get('metadata', {}).get('title', '')} {c['content']}".strip()
+                for c in batch
+            ]
 
-            if object_name in already_indexed:
-                logger.info("Pulando (já indexado): {}", object_name)
-                total_skipped += 1
-                continue
+            embeddings = embed_texts(texts)
 
-            logger.info("Processando {}", object_name)
+            doc_ids = [str(uuid.uuid4()) for _ in batch]
+            contents = [c["content"] for c in batch]
+            metadatas = [c.get("metadata", {}) for c in batch]
 
-            response = client.get_object(BUCKET, object_name)
-            chunks = list(stream_jsonl(response))
-            response.close()
-
-            if not chunks:
-                logger.warning("Nenhum chunk em {}", object_name)
-                continue
-
-            data_file_id = db.register_data_file(
-                dataset_id=dataset_id,
-                layer="gold",
-                bucket=BUCKET,
-                object_key=object_name,
-                row_count=len(chunks),
-                size_bytes=None,
-                checksum=None,
-                status="done",
+            milvus_ids = milvus.insert_batch(
+                doc_ids=doc_ids,
+                contents=contents,
+                embeddings=embeddings,
+                metadatas=metadatas,
             )
 
-            logger.info("{} chunks carregados de {}", len(chunks), object_name)
-
-            for i in range(0, len(chunks), BATCH_SIZE):
-
-                batch = chunks[i:i + BATCH_SIZE]
-
-                # Gold já tem content pronto — usa diretamente com o título do metadata
-                texts = [
-                    f"{c.get('metadata', {}).get('title', '')} {c['content']}".strip()
-                    for c in batch
-                ]
-
-                embeddings = embed_texts(texts)
-
-                doc_ids = [str(uuid.uuid4()) for _ in batch]
-                contents = [c["content"] for c in batch]
-                metadatas = [c.get("metadata", {}) for c in batch]
-
-                milvus_ids = milvus.insert_batch(
-                    doc_ids=doc_ids,
-                    contents=contents,
-                    embeddings=embeddings,
-                    metadatas=metadatas,
+            for chunk, milvus_id in zip(batch, milvus_ids):
+                db.save_document(
+                    data_file_id=data_file_id,
+                    milvus_id=milvus_id,
+                    content=chunk["content"],
+                    chunk_index=int(chunk.get("chunk_index", 0)),
+                    token_count=len(chunk["content"].split()),
+                    metadata=chunk.get("metadata", {}),
+                    embed_model=EMBED_MODEL,
+                    embed_version=DATASET_VERSION,
                 )
 
-                for chunk, milvus_id in zip(batch, milvus_ids):
-                    db.save_document(
-                        data_file_id=data_file_id,
-                        milvus_id=milvus_id,
-                        content=chunk["content"],
-                        chunk_index=int(chunk.get("chunk_index", 0)),
-                        token_count=len(chunk["content"].split()),
-                        metadata=chunk.get("metadata", {}),
-                        embed_model=EMBED_MODEL,
-                        embed_version=DATASET_VERSION,
-                    )
+            total_indexed += len(batch)
 
-                total_indexed += len(batch)
+        total_files += 1
 
-            total_files += 1
-
-            db.log_audit(
-                entity="data_files",
-                entity_id=data_file_id,
-                action="indexed_milvus",
-                details={
-                    "object_key": object_name,
-                    "chunks_indexed": len(chunks),
-                    "embed_model": EMBED_MODEL,
-                },
-            )
-
-        milvus.flush()
-
-        mlflow.log_metrics({
-            "total_files_indexed": total_files,
-            "total_files_skipped": total_skipped,
-            "total_chunks_indexed": total_indexed,
-        })
-        mlflow.log_params({"embed_model": EMBED_MODEL})
-
-        logger.info(
-            "=== Indexação concluída: {} chunks em {} arquivo(s) novo(s), {} ignorado(s) ===",
-            total_indexed, total_files, total_skipped,
+        db.log_audit(
+            entity="data_files",
+            entity_id=data_file_id,
+            action="indexed_milvus",
+            details={
+                "object_key": object_name,
+                "chunks_indexed": len(chunks),
+                "embed_model": EMBED_MODEL,
+            },
         )
+
+    milvus.flush()
+
+    logger.info(
+        "=== Indexação concluída: {} chunks em {} arquivo(s) novo(s), {} ignorado(s) ===",
+        total_indexed, total_files, total_skipped,
+    )
 
 
 if __name__ == "__main__":

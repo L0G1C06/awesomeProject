@@ -5,6 +5,9 @@ networks:
 volumes:
   minio_data:
   postgres_data:
+  etcd_data:
+  milvus_data:
+  ollama_data:
 
 services:
 
@@ -130,22 +133,6 @@ services:
     container_name: rag_ollama
     restart: unless-stopped
     ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-      - ./infra/ollama/entrypoint.sh:/entrypoint.sh
-    entrypoint: ["/bin/sh", "/entrypoint.sh"]
-    networks:
-      - rag_network
-
-  # ─────────────────────────────────────────
-  # LLM LOCAL — Ollama
-  # ─────────────────────────────────────────
-  ollama:
-    image: ollama/ollama:latest
-    container_name: rag_ollama
-    restart: unless-stopped
-    ports:
       - "11435:11434"
     volumes:
       - ollama_data:/root/.ollama
@@ -155,28 +142,18 @@ services:
       - rag_network
 
   # ─────────────────────────────────────────
-  # MLOPS — MLflow
+  # UI MILVUS — Attu
   # ─────────────────────────────────────────
-  mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.13.0
-    container_name: rag_mlflow
+  attu:
+    image: zilliz/attu:latest
+    container_name: rag_attu
     restart: unless-stopped
-    command: >
-      mlflow server
-      --backend-store-uri postgresql://${POSTGRES_USER:-raguser}:${POSTGRES_PASSWORD:-ragpass}@postgres:5432/${POSTGRES_DB:-ragdb}
-      --default-artifact-root s3://gold/mlflow
-      --host 0.0.0.0
-      --port 5000
-    environment:
-      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "5000:5000"
+      - "8080:3000"
+    environment:
+      MILVUS_URL: milvus:19530
     depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
+      milvus:
         condition: service_healthy
     networks:
       - rag_network
@@ -209,8 +186,6 @@ services:
         condition: service_healthy
       milvus:
         condition: service_healthy
-      mlflow:
-        condition: service_started
     volumes:
       - ./:/app
     networks:

@@ -10,12 +10,12 @@
 | Nome | Email | Matrícula | Papel |
 |------|-------|-----------|-------|
 | **Eduardo Weber Maldaner** | eduwmaldaner@gmail.com | 211948 | Product Owner (PO) |
-| **Lucas Carmargo Oliveira** | Lucaslco2005@gmail.com | 222231 | Scrum Developer |
+| **Lucas Carmargo Oliveira** | lucaslco2005@gmail.com | 222231 | Scrum Developer |
 | **Jeferson Oliveira Moreira** | jef.moreira1@gmail.com | 212148 | Scrum Developer |
-| **Wallace Eron Melo de Barros** | — | 211751 | Scrum Developer |
-| **Heifor Barreto** | — | 224541 | Scrum Developer |
-| **Nicola Luca Tognocchi** | — | 223138 | Scrum Developer |
-| **Arthur Soares Maffeis** | — | 150448 | Scrum Developer |
+| **Wallace Eron Melo de Barros** | wallaceerom7@gmail.com | 211751 | Scrum Developer |
+| **Heifor Barreto** | heiforbarreto@gmail.com | 224541 | Scrum Developer |
+| **Nicola Luca Tognocchi** | nicolatognocchi33x@gmail.com | 223138 | Scrum Developer |
+| **Arthur Soares Maffeis** | arthurmaffeis@hotmail.com | 150448 | Scrum Developer |
 
 ### 📋 Informações do Projeto
 
@@ -40,7 +40,6 @@
 │     • Ollama (local)        → embeddings + LLM                       │
 │     • HuggingFace (remoto)  → embeddings + LLM + reranker (local)    │
 │     • OpenAI (remoto)       → LLM (embeddings via HuggingFace)       │
-│   MLflow → tracking de runs, parâmetros, métricas e artefatos        │
 └────────────────────────────────┬─────────────────────────────────────┘
                                  │
 ┌────────────────────────────────▼─────────────────────────────────────┐
@@ -117,14 +116,14 @@ Auto-detect (em `api/services/rag_service.py::_detect_provider`):
 | **UI-1** | Frontend Gradio | Criar interface de consulta | Jeferson | ✅ Concluído |
 | **UI-2** | Seletor de Provider/Modelo | Permitir escolher entre Ollama / HuggingFace / OpenAI | Jeferson | ✅ Concluído |
 | **UI-3** | Exibição de Resultados | Mostrar snippets, scores, autores, categorias e links arXiv | Lucas | ✅ Concluído |
-| **UI-4** | Filtros Avançados | Filtrar por categoria, data, autor | Jeferson | 📋 Backlog |
-| **UI-5** | Exportação de Resultados | Gerar relatórios em PDF/CSV | Jeferson | 📋 Backlog |
+| **UI-4** | Filtros Avançados | Filtrar por categoria, data, autor | Jeferson | ✅ Concluído |
+| **UI-5** | Exportação de Resultados | Gerar relatórios em PDF/CSV | Jeferson | ✅ Concluído |
 
 ### Épico 5: Observabilidade e Monitoramento
 
 | ID | Tarefa | Descrição | Responsável | Status |
 |----|--------|-----------|-------------|--------|
-| **OBS-1** | MLflow Tracking | Registrar queries, latência, tokens e artefatos | Lucas | ✅ Concluído |
+| **OBS-1** | MLflow Tracking | Registrar queries, latência, tokens e artefatos | Lucas | 📋 Backlog |
 | **OBS-2** | Persistência em PostgreSQL | Auditoria, runs RAG, versionamento de datasets | Jeferson | ✅ Concluído |
 | **OBS-3** | Dashboard de Performance | Criar dashboard com métricas de uso | Eduardo | 📋 Backlog |
 | **OBS-4** | Alertas e Logs | Configurar logs estruturados e alertas | Jeferson | 📋 Backlog |
@@ -184,7 +183,6 @@ make embed        # Embeddings + indexação no Milvus
 |---------|-----|-------------|
 | **Frontend (Gradio)** | http://localhost:7860 | — |
 | **API (FastAPI)** | http://localhost:8000/docs | — |
-| **MLflow** | http://localhost:5000 | — |
 | **MinIO Console** | http://localhost:9001 | `minioadmin` / `minioadmin` |
 | **Attu (Milvus UI)** | http://localhost:8080 | — |
 | **PostgreSQL** | `localhost:5433` | `raguser` / `ragpass` (db: `ragdb`) |
@@ -346,17 +344,6 @@ OPENAI_TIMEOUT_SECONDS=120
 LLM_PROVIDER=ollama                     # ollama | huggingface | openai
 ```
 
-### MLflow
-
-```bash
-MLFLOW_TRACKING_URI=http://localhost:5000
-MLFLOW_EXPERIMENT_NAME=rag-enterprise
-MLFLOW_S3_ENDPOINT_URL=http://localhost:9000
-MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD=true
-AWS_ACCESS_KEY_ID=minioadmin
-AWS_SECRET_ACCESS_KEY=minioadmin
-```
-
 ### Pipeline RAG
 
 ```bash
@@ -402,6 +389,15 @@ TOP_K_RETRIEVAL=5
 ```
 
 > Dentro do `docker-compose`, `API_URL` é sobrescrito para `http://api:8000` automaticamente.
+
+### Exportação de Resultados
+
+A exportação (UI-5) é feita diretamente no frontend após cada consulta. Dois botões ficam disponíveis abaixo dos resultados:
+
+| Formato | Biblioteca | Colunas / Conteúdo |
+|---------|-----------|-------------------|
+| **CSV** | stdlib `csv` | `rank`, `score`, `title`, `authors`, `categories`, `primary_category`, `published`, `arxiv_id`, `url`, `content` |
+| **PDF** | `fpdf2` | Consulta, resposta e lista de documentos com metadados e excerpt |
 
 ---
 
@@ -498,8 +494,7 @@ make test-cov        # Testes com cobertura HTML
 make lint            # Linter (ruff)
 make format          # Formatter (ruff format + black)
 
-make mlflow-ui       # Abre MLflow no navegador
-make open-all        # Lista URLs de todos os serviços
+make open-all        # Lista URLs de todos os serviços (API, Gradio, MinIO, Attu, Milvus, PostgreSQL)
 make clean           # Remove containers, volumes e imagens órfãs
 ```
 
@@ -553,10 +548,10 @@ Geração
    └── openai       → OpenAI Chat Completions (OPENAI_MODEL)
    │
    ▼
-Logging MLflow + persistência PostgreSQL (rag_runs + audit_log)
+Persistência PostgreSQL (rag_runs + audit_log)
    │
    ▼
-QueryResponse (answer, retrieved_docs, latency_ms, run_id, mlflow_run_id…)
+QueryResponse (answer, retrieved_docs, latency_ms, run_id)
 ```
 
 ---
@@ -576,18 +571,6 @@ Inicializado automaticamente por [infra/postgres/init.sql](infra/postgres/init.s
 
 ---
 
-## 📊 MLOps — MLflow
-
-Cada query RAG registra automaticamente em MLflow:
-
-- **Parâmetros**: `query`, `top_k`, `llm_model`, `embed_model`, `llm_provider`, `reranker_used`, prévias do prompt e da resposta.
-- **Métricas**: `latency_ms`, `prompt_tokens`, `response_tokens`, `total_tokens`, `docs_retrieved` (e `docs_before_rerank` / `docs_after_rerank` no fluxo HF).
-- **Artefatos**: tabela JSON com os documentos recuperados (resumo) e o JSON completo (`docs_*_full`).
-
-UI: http://localhost:5000
-
----
-
 ## 🌐 API HTTP
 
 ### `POST /query/`
@@ -598,7 +581,11 @@ UI: http://localhost:5000
   "query": "What are recent advances in retrieval-augmented generation?",
   "top_k": 5,
   "llm_model": "gpt-4o-mini",        // opcional
-  "llm_provider": "openai"            // opcional — ollama | huggingface | openai
+  "llm_provider": "openai",           // opcional — ollama | huggingface | openai
+  "filter_category": "cs.LG",        // opcional — categoria arXiv (ex: cs.LG, cs.CV)
+  "filter_author": "Hinton",          // opcional — parte do nome do autor
+  "filter_date_from": "2023-01-01",  // opcional — YYYY-MM-DD
+  "filter_date_to": "2024-12-31"     // opcional — YYYY-MM-DD
 }
 ```
 
@@ -624,8 +611,7 @@ UI: http://localhost:5000
   ],
   "llm_provider": "openai",
   "llm_model": "gpt-4o-mini",
-  "latency_ms": 2840,
-  "mlflow_run_id": "…"
+  "latency_ms": 2840
 }
 ```
 
@@ -681,7 +667,6 @@ make test-cov          # Cobertura HTML
 - [ArXiv API Documentation](https://info.arxiv.org/help/api/index.html)
 - [Ollama Models](https://ollama.com/library)
 - [Milvus Docs](https://milvus.io/docs)
-- [MLflow Docs](https://mlflow.org/docs/latest)
 - [FastAPI Docs](https://fastapi.tiangolo.com)
 - [MinIO Docs](https://min.io/docs)
 - [HuggingFace Inference API](https://huggingface.co/docs/api-inference/index)
