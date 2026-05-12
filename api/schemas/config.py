@@ -34,10 +34,6 @@ class Settings(BaseSettings):
     OPENAI_REASONING_EFFORT: str | None = None
     OPENAI_TIMEOUT_SECONDS: int = 120
 
-    # MLflow
-    MLFLOW_TRACKING_URI: str
-    MLFLOW_EXPERIMENT_NAME: str
-
     # RAG Pipeline
     CHUNK_SIZE: int
     CHUNK_OVERLAP: int

@@ -35,4 +35,3 @@ class QueryResponse(BaseModel):
     llm_provider: str
     llm_model: str
     latency_ms: int
-    mlflow_run_id: str | None = None

@@ -314,9 +314,7 @@ def query_rag(question: str, top_k_raw, selected_model: str) -> tuple[str, str, 
         provider     = data.get("llm_provider", provider_to_use)
         model        = data.get("llm_model", model_to_use)
         docs         = data.get("retrieved_docs", [])
-        run_id       = data.get("run_id", "")
-        mlflow_run   = data.get("mlflow_run_id")
-
+        run_id = data.get("run_id", "")
         n = len(docs)
 
         meta_parts = [
@@ -327,8 +325,6 @@ def query_rag(question: str, top_k_raw, selected_model: str) -> tuple[str, str, 
         ]
         if run_id:
             meta_parts.append(f"<span><strong>Run ID</strong> &nbsp;<code>{run_id}</code></span>")
-        if mlflow_run:
-            meta_parts.append(f"<span><strong>MLflow</strong> &nbsp;<code>{mlflow_run}</code></span>")
 
         run_meta_html = '<div class="run-meta">' + "".join(meta_parts) + "</div>"
 
