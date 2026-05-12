@@ -5,6 +5,9 @@ networks:
 volumes:
   minio_data:
   postgres_data:
+  etcd_data:
+  milvus_data:
+  ollama_data:
 
 services:
 
@@ -130,22 +133,6 @@ services:
     container_name: rag_ollama
     restart: unless-stopped
     ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-      - ./infra/ollama/entrypoint.sh:/entrypoint.sh
-    entrypoint: ["/bin/sh", "/entrypoint.sh"]
-    networks:
-      - rag_network
-
-  # ─────────────────────────────────────────
-  # LLM LOCAL — Ollama
-  # ─────────────────────────────────────────
-  ollama:
-    image: ollama/ollama:latest
-    container_name: rag_ollama
-    restart: unless-stopped
-    ports:
       - "11435:11434"
     volumes:
       - ollama_data:/root/.ollama
@@ -162,11 +149,12 @@ services:
     container_name: rag_mlflow
     restart: unless-stopped
     command: >
+      /bin/sh -c "pip install psycopg2-binary boto3 --quiet &&
       mlflow server
       --backend-store-uri postgresql://${POSTGRES_USER:-raguser}:${POSTGRES_PASSWORD:-ragpass}@postgres:5432/${POSTGRES_DB:-ragdb}
       --default-artifact-root s3://gold/mlflow
       --host 0.0.0.0
-      --port 5000
+      --port 5000"
     environment:
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
