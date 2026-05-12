@@ -9,7 +9,7 @@
         ingest process embed index \
         test test-unit test-integration test-e2e \
         lint format \
-        mlflow-ui status
+        open-all status
 
 # ── Cores para output ──────────────────────────────────────────
 BOLD  := \033[1m
@@ -61,10 +61,10 @@ status: ## Status dos containers
 	@echo ""
 
 infra-up: env ## Sobe apenas infraestrutura (sem api/frontend)
-	docker compose up -d minio postgres etcd milvus ollama mlflow minio_init
+	docker compose up -d minio postgres etcd milvus ollama attu minio_init
 
 infra-down: ## Para apenas infraestrutura
-	docker compose stop minio postgres etcd milvus ollama mlflow
+	docker compose stop minio postgres etcd milvus ollama attu
 
 clean: ## Remove containers, volumes e imagens do projeto
 	@echo "$(RED)▶ Removendo tudo...$(RESET)"
@@ -147,14 +147,6 @@ format: ## Formata código (ruff + black)
 	docker compose exec api black .
 
 # ═══════════════════════════════════════════════════════════════
-#  MLOPS
-# ═══════════════════════════════════════════════════════════════
-
-mlflow-ui: ## Abre MLflow UI no browser
-	@echo "$(GREEN)MLflow: http://localhost:5000$(RESET)"
-	@open http://localhost:5000 2>/dev/null || xdg-open http://localhost:5000 2>/dev/null || true
-
-# ═══════════════════════════════════════════════════════════════
 #  ACESSO RÁPIDO AOS SERVIÇOS
 # ═══════════════════════════════════════════════════════════════
 
@@ -163,8 +155,8 @@ open-all: ## Mostra URLs de todos os serviços
 	@echo "$(BOLD)$(CYAN)Serviços disponíveis:$(RESET)"
 	@echo "  $(GREEN)API (FastAPI docs)$(RESET)    → http://localhost:8000/docs"
 	@echo "  $(GREEN)Frontend (Gradio)$(RESET)     → http://localhost:7860"
-	@echo "  $(GREEN)MLflow$(RESET)                → http://localhost:5000"
 	@echo "  $(GREEN)MinIO Console$(RESET)         → http://localhost:9001"
+	@echo "  $(GREEN)Attu (Milvus UI)$(RESET)      → http://localhost:8080"
 	@echo "  $(GREEN)Milvus$(RESET)                → localhost:19530"
 	@echo "  $(GREEN)PostgreSQL$(RESET)            → localhost:5433"
 	@echo ""

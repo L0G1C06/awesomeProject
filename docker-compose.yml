@@ -149,7 +149,7 @@ services:
     container_name: rag_attu
     restart: unless-stopped
     ports:
-      - "8081:3000"
+      - "8080:3000"
     environment:
       MILVUS_URL: milvus:19530
     depends_on:

@@ -494,7 +494,7 @@ make test-cov        # Testes com cobertura HTML
 make lint            # Linter (ruff)
 make format          # Formatter (ruff format + black)
 
-make open-all        # Lista URLs de todos os serviços
+make open-all        # Lista URLs de todos os serviços (API, Gradio, MinIO, Attu, Milvus, PostgreSQL)
 make clean           # Remove containers, volumes e imagens órfãs
 ```
 
