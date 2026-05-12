@@ -13,7 +13,7 @@ API_URL       = os.getenv("API_URL", "http://localhost:8001")
 HF_MODEL      = os.getenv("HF_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
 LLM_PROVIDER  = os.getenv("LLM_PROVIDER", "huggingface").lower()
 OLLAMA_MODEL  = os.getenv("OLLAMA_LLM_MODEL", "mistral")
-OPENAI_MODEL  = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+OPENAI_MODEL  = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 ACTIVE_MODEL  = OPENAI_MODEL if LLM_PROVIDER == "openai" else HF_MODEL
 GRADIO_PORT   = int(os.getenv("GRADIO_SERVER_PORT", "7860"))
 TOP_K_DEFAULT = int(os.getenv("TOP_K_RETRIEVAL", 5))
@@ -35,7 +35,7 @@ HUGGINGFACE_MODELS = [
 
 # Modelos OpenAI (via API)
 OPENAI_MODELS = [
-    "gpt-5.4-mini"
+    "gpt-4o-mini"
 ]
 
 # Combina os modelos com rótulos visuais para distinguir

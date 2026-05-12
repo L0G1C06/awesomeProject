@@ -40,14 +40,11 @@
 │     • Ollama (local)        → embeddings + LLM                       │
 │     • HuggingFace (remoto)  → embeddings + LLM + reranker (local)    │
 │     • OpenAI (remoto)       → LLM (embeddings via HuggingFace)       │
-│   MLflow → tracking de runs, parâmetros, métricas e artefatos        │
 └────────────────────────────────┬─────────────────────────────────────┘
                                  │
 ┌────────────────────────────────▼─────────────────────────────────────┐
 │                        CAMADA DE DADOS                               │
 │   MinIO  (Bronze/Silver/Gold)   Milvus  (Vetorial)   PostgreSQL      │
-│                                  ↑                                   │
-│                           Attu :8080  (UI Milvus)                    │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -124,7 +121,7 @@ Auto-detect (em `api/services/rag_service.py::_detect_provider`):
 
 | ID | Tarefa | Descrição | Responsável | Status |
 |----|--------|-----------|-------------|--------|
-| **OBS-1** | MLflow Tracking | Registrar queries, latência, tokens e artefatos | Lucas | ✅ Concluído |
+| **OBS-1** | MLflow Tracking | Registrar queries, latência, tokens e artefatos | Lucas | 📋 Backlog |
 | **OBS-2** | Persistência em PostgreSQL | Auditoria, runs RAG, versionamento de datasets | Jeferson | ✅ Concluído |
 | **OBS-3** | Dashboard de Performance | Criar dashboard com métricas de uso | Eduardo | 📋 Backlog |
 | **OBS-4** | Alertas e Logs | Configurar logs estruturados e alertas | Jeferson | 📋 Backlog |
@@ -134,7 +131,6 @@ Auto-detect (em `api/services/rag_service.py::_detect_provider`):
 - **PostgreSQL**: metadados do pipeline, controle de versionamento por dataset, registro de runs RAG e auditoria de eventos.
 - **Milvus**: armazenamento de embeddings e indexação vetorial (HNSW / COSINE) para retrieval semântico.
 - **MinIO**: data lake S3-compatible com camadas Bronze, Silver e Gold.
-- **Attu**: console visual do Milvus disponível em `http://localhost:8080`.
 
 ---
 
@@ -184,9 +180,7 @@ make embed        # Embeddings + indexação no Milvus
 |---------|-----|-------------|
 | **Frontend (Gradio)** | http://localhost:7860 | — |
 | **API (FastAPI)** | http://localhost:8000/docs | — |
-| **MLflow** | http://localhost:5000 | — |
 | **MinIO Console** | http://localhost:9001 | `minioadmin` / `minioadmin` |
-| **Attu (Milvus UI)** | http://localhost:8080 | — |
 | **PostgreSQL** | `localhost:5433` | `raguser` / `ragpass` (db: `ragdb`) |
 | **Milvus (gRPC)** | `localhost:19530` | — |
 | **Ollama** | http://localhost:11435 | — |
@@ -346,17 +340,6 @@ OPENAI_TIMEOUT_SECONDS=120
 LLM_PROVIDER=ollama                     # ollama | huggingface | openai
 ```
 
-### MLflow
-
-```bash
-MLFLOW_TRACKING_URI=http://localhost:5000
-MLFLOW_EXPERIMENT_NAME=rag-enterprise
-MLFLOW_S3_ENDPOINT_URL=http://localhost:9000
-MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD=true
-AWS_ACCESS_KEY_ID=minioadmin
-AWS_SECRET_ACCESS_KEY=minioadmin
-```
-
 ### Pipeline RAG
 
 ```bash
@@ -498,7 +481,6 @@ make test-cov        # Testes com cobertura HTML
 make lint            # Linter (ruff)
 make format          # Formatter (ruff format + black)
 
-make mlflow-ui       # Abre MLflow no navegador
 make open-all        # Lista URLs de todos os serviços
 make clean           # Remove containers, volumes e imagens órfãs
 ```
@@ -553,10 +535,10 @@ Geração
    └── openai       → OpenAI Chat Completions (OPENAI_MODEL)
    │
    ▼
-Logging MLflow + persistência PostgreSQL (rag_runs + audit_log)
+Persistência PostgreSQL (rag_runs + audit_log)
    │
    ▼
-QueryResponse (answer, retrieved_docs, latency_ms, run_id, mlflow_run_id…)
+QueryResponse (answer, retrieved_docs, latency_ms, run_id)
 ```
 
 ---
@@ -573,18 +555,6 @@ Inicializado automaticamente por [infra/postgres/init.sql](infra/postgres/init.s
 | `documents` | Vínculo chunk ↔ embedding (`milvus_id`, `embed_model`, `metadata`) |
 | `rag_runs` | Cada execução de query RAG (query, prompt, resposta, latência, top-k, feedback) |
 | `audit_log` | Eventos auditáveis em formato JSONB |
-
----
-
-## 📊 MLOps — MLflow
-
-Cada query RAG registra automaticamente em MLflow:
-
-- **Parâmetros**: `query`, `top_k`, `llm_model`, `embed_model`, `llm_provider`, `reranker_used`, prévias do prompt e da resposta.
-- **Métricas**: `latency_ms`, `prompt_tokens`, `response_tokens`, `total_tokens`, `docs_retrieved` (e `docs_before_rerank` / `docs_after_rerank` no fluxo HF).
-- **Artefatos**: tabela JSON com os documentos recuperados (resumo) e o JSON completo (`docs_*_full`).
-
-UI: http://localhost:5000
 
 ---
 
@@ -624,8 +594,7 @@ UI: http://localhost:5000
   ],
   "llm_provider": "openai",
   "llm_model": "gpt-4o-mini",
-  "latency_ms": 2840,
-  "mlflow_run_id": "…"
+  "latency_ms": 2840
 }
 ```
 
@@ -681,7 +650,6 @@ make test-cov          # Cobertura HTML
 - [ArXiv API Documentation](https://info.arxiv.org/help/api/index.html)
 - [Ollama Models](https://ollama.com/library)
 - [Milvus Docs](https://milvus.io/docs)
-- [MLflow Docs](https://mlflow.org/docs/latest)
 - [FastAPI Docs](https://fastapi.tiangolo.com)
 - [MinIO Docs](https://min.io/docs)
 - [HuggingFace Inference API](https://huggingface.co/docs/api-inference/index)

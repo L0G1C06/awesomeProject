@@ -166,5 +166,5 @@ open-all: ## Mostra URLs de todos os serviços
 	@echo "  $(GREEN)MLflow$(RESET)                → http://localhost:5000"
 	@echo "  $(GREEN)MinIO Console$(RESET)         → http://localhost:9001"
 	@echo "  $(GREEN)Milvus$(RESET)                → localhost:19530"
-	@echo "  $(GREEN)PostgreSQL$(RESET)            → localhost:5432"
+	@echo "  $(GREEN)PostgreSQL$(RESET)            → localhost:5433"
 	@echo ""
