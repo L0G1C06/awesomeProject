@@ -10,12 +10,12 @@
 | Nome | Email | Matrícula | Papel |
 |------|-------|-----------|-------|
 | **Eduardo Weber Maldaner** | eduwmaldaner@gmail.com | 211948 | Product Owner (PO) |
-| **Lucas Carmargo Oliveira** | Lucaslco2005@gmail.com | 222231 | Scrum Developer |
+| **Lucas Carmargo Oliveira** | lucaslco2005@gmail.com | 222231 | Scrum Developer |
 | **Jeferson Oliveira Moreira** | jef.moreira1@gmail.com | 212148 | Scrum Developer |
-| **Wallace Eron Melo de Barros** | — | 211751 | Scrum Developer |
-| **Heifor Barreto** | — | 224541 | Scrum Developer |
-| **Nicola Luca Tognocchi** | — | 223138 | Scrum Developer |
-| **Arthur Soares Maffeis** | — | 150448 | Scrum Developer |
+| **Wallace Eron Melo de Barros** | wallaceerom7@gmail.com | 211751 | Scrum Developer |
+| **Heifor Barreto** | heiforbarreto@gmail.com | 224541 | Scrum Developer |
+| **Nicola Luca Tognocchi** | nicolatognocchi33x@gmail.com | 223138 | Scrum Developer |
+| **Arthur Soares Maffeis** | arthurmaffeis@hotmail.com | 150448 | Scrum Developer |
 
 ### 📋 Informações do Projeto
 
