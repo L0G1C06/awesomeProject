@@ -45,6 +45,8 @@
 ┌────────────────────────────────▼─────────────────────────────────────┐
 │                        CAMADA DE DADOS                               │
 │   MinIO  (Bronze/Silver/Gold)   Milvus  (Vetorial)   PostgreSQL      │
+│                                  ↑                                   │
+│                           Attu :8080  (UI Milvus)                    │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -114,8 +116,8 @@ Auto-detect (em `api/services/rag_service.py::_detect_provider`):
 | **UI-1** | Frontend Gradio | Criar interface de consulta | Jeferson | ✅ Concluído |
 | **UI-2** | Seletor de Provider/Modelo | Permitir escolher entre Ollama / HuggingFace / OpenAI | Jeferson | ✅ Concluído |
 | **UI-3** | Exibição de Resultados | Mostrar snippets, scores, autores, categorias e links arXiv | Lucas | ✅ Concluído |
-| **UI-4** | Filtros Avançados | Filtrar por categoria, data, autor | Jeferson | 📋 Backlog |
-| **UI-5** | Exportação de Resultados | Gerar relatórios em PDF/CSV | Jeferson | 📋 Backlog |
+| **UI-4** | Filtros Avançados | Filtrar por categoria, data, autor | Jeferson | ✅ Concluído |
+| **UI-5** | Exportação de Resultados | Gerar relatórios em PDF/CSV | Jeferson | ✅ Concluído |
 
 ### Épico 5: Observabilidade e Monitoramento
 
@@ -131,6 +133,7 @@ Auto-detect (em `api/services/rag_service.py::_detect_provider`):
 - **PostgreSQL**: metadados do pipeline, controle de versionamento por dataset, registro de runs RAG e auditoria de eventos.
 - **Milvus**: armazenamento de embeddings e indexação vetorial (HNSW / COSINE) para retrieval semântico.
 - **MinIO**: data lake S3-compatible com camadas Bronze, Silver e Gold.
+- **Attu**: console visual do Milvus disponível em `http://localhost:8080`.
 
 ---
 
@@ -181,6 +184,7 @@ make embed        # Embeddings + indexação no Milvus
 | **Frontend (Gradio)** | http://localhost:7860 | — |
 | **API (FastAPI)** | http://localhost:8000/docs | — |
 | **MinIO Console** | http://localhost:9001 | `minioadmin` / `minioadmin` |
+| **Attu (Milvus UI)** | http://localhost:8080 | — |
 | **PostgreSQL** | `localhost:5433` | `raguser` / `ragpass` (db: `ragdb`) |
 | **Milvus (gRPC)** | `localhost:19530` | — |
 | **Ollama** | http://localhost:11435 | — |
@@ -386,6 +390,15 @@ TOP_K_RETRIEVAL=5
 
 > Dentro do `docker-compose`, `API_URL` é sobrescrito para `http://api:8000` automaticamente.
 
+### Exportação de Resultados
+
+A exportação (UI-5) é feita diretamente no frontend após cada consulta. Dois botões ficam disponíveis abaixo dos resultados:
+
+| Formato | Biblioteca | Colunas / Conteúdo |
+|---------|-----------|-------------------|
+| **CSV** | stdlib `csv` | `rank`, `score`, `title`, `authors`, `categories`, `primary_category`, `published`, `arxiv_id`, `url`, `content` |
+| **PDF** | `fpdf2` | Consulta, resposta e lista de documentos com metadados e excerpt |
+
 ---
 
 ## 🔧 Configurando seu Dataset — ArXiv
@@ -568,7 +581,11 @@ Inicializado automaticamente por [infra/postgres/init.sql](infra/postgres/init.s
   "query": "What are recent advances in retrieval-augmented generation?",
   "top_k": 5,
   "llm_model": "gpt-4o-mini",        // opcional
-  "llm_provider": "openai"            // opcional — ollama | huggingface | openai
+  "llm_provider": "openai",           // opcional — ollama | huggingface | openai
+  "filter_category": "cs.LG",        // opcional — categoria arXiv (ex: cs.LG, cs.CV)
+  "filter_author": "Hinton",          // opcional — parte do nome do autor
+  "filter_date_from": "2023-01-01",  // opcional — YYYY-MM-DD
+  "filter_date_to": "2024-12-31"     // opcional — YYYY-MM-DD
 }
 ```
 

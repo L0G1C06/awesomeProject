@@ -31,6 +31,10 @@ async def rag_query(
             top_k=request.top_k,
             llm_model=request.llm_model,
             llm_provider=request.llm_provider,
+            filter_category=request.filter_category,
+            filter_author=request.filter_author,
+            filter_date_from=request.filter_date_from,
+            filter_date_to=request.filter_date_to,
         )
         return result
     except Exception as e:

@@ -77,13 +77,20 @@ class MilvusService:
         res = self.collection.insert(rows)
         return res.primary_keys
 
-    def search(self, vector: list[float], top_k: int = 5, collection_name: str = None) -> list[dict]:
+    def search(
+        self,
+        vector: list[float],
+        top_k: int = 5,
+        collection_name: str = None,
+        expr: str | None = None,
+    ) -> list[dict]:
         self.collection.load()
         results = self.collection.search(
             data=[vector],
             anns_field="embedding",
             param={"metric_type": "COSINE", "params": {"ef": 64}},
             limit=top_k,
+            expr=expr,
             output_fields=["doc_uuid", "content", "metadata"],
         )
         hits = []

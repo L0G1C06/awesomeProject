@@ -30,7 +30,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str | None = None
-    OPENAI_MODEL: str = "gpt-5.4-mini"
+    OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_REASONING_EFFORT: str | None = None
     OPENAI_TIMEOUT_SECONDS: int = 120
 

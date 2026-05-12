@@ -142,6 +142,23 @@ services:
       - rag_network
 
   # ─────────────────────────────────────────
+  # UI MILVUS — Attu
+  # ─────────────────────────────────────────
+  attu:
+    image: zilliz/attu:latest
+    container_name: rag_attu
+    restart: unless-stopped
+    ports:
+      - "8081:3000"
+    environment:
+      MILVUS_URL: milvus:19530
+    depends_on:
+      milvus:
+        condition: service_healthy
+    networks:
+      - rag_network
+
+  # ─────────────────────────────────────────
   # API — FastAPI
   # ─────────────────────────────────────────
   api:

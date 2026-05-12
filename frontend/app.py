@@ -1,11 +1,22 @@
 """
 Frontend — Gradio
-Interface de consulta RAG com visualização de documentos recuperados.
+Interface de consulta RAG com visualização de documentos recuperados,
+filtros avançados (UI-4) e exportação CSV/PDF (UI-5).
 """
+import csv
 import os
+import tempfile
+
 import httpx
 import gradio as gr
 from dotenv import load_dotenv
+
+try:
+    from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
+    HAS_FPDF = True
+except ImportError:
+    HAS_FPDF = False
 
 load_dotenv()
 
@@ -21,31 +32,26 @@ TOP_K_MIN     = 1
 TOP_K_MAX     = 20
 
 # ── Modelos disponíveis ────────────────────────────────────────────────────────
-# Modelos Ollama (locais, rodando em container)
 OLLAMA_MODELS = list(dict.fromkeys([
     OLLAMA_MODEL,
     "llama3.2",
     "mistral",
 ]))
 
-# Modelos HuggingFace (via API remota)
 HUGGINGFACE_MODELS = [
     "meta-llama/Meta-Llama-3-8B-Instruct",
 ]
 
-# Modelos OpenAI (via API)
 OPENAI_MODELS = [
     "gpt-4o-mini"
 ]
 
-# Combina os modelos com rótulos visuais para distinguir
 AVAILABLE_MODELS = (
     [f"🔵 {m} [ollama]" for m in OLLAMA_MODELS] +
     [f"🟠 {m} [huggingface]" for m in HUGGINGFACE_MODELS] +
     [f"🔴 {m} [openai]" for m in OPENAI_MODELS]
 )
 
-# Garante que o modelo padrão do .env esteja na lista
 DEFAULT_DISPLAY = None
 if OLLAMA_MODEL and LLM_PROVIDER == "ollama":
     for model in AVAILABLE_MODELS:
@@ -69,18 +75,21 @@ elif HF_MODEL:
             DEFAULT_DISPLAY = model
             break
     else:
-        # Se não encontrando, adiciona com a marcação correta
         if "/" in HF_MODEL:
-            # É um modelo HuggingFace
             DEFAULT_DISPLAY = f"🟠 {HF_MODEL} [huggingface]"
             AVAILABLE_MODELS.insert(0, DEFAULT_DISPLAY)
         else:
-            # É um modelo Ollama
             DEFAULT_DISPLAY = f"🔵 {HF_MODEL} [ollama]"
             AVAILABLE_MODELS.insert(0, DEFAULT_DISPLAY)
 
 if not DEFAULT_DISPLAY:
     DEFAULT_DISPLAY = AVAILABLE_MODELS[0] if AVAILABLE_MODELS else HF_MODEL
+
+# Categorias arXiv mais comuns para o seletor
+ARXIV_CATEGORIES = [
+    "", "cs.AI", "cs.LG", "cs.CV", "cs.CL", "cs.NE", "cs.RO",
+    "stat.ML", "math.ST", "q-bio.GN", "physics.data-an",
+]
 
 # ── CSS ────────────────────────────────────────────────────────────────────────
 CSS = """
@@ -167,6 +176,17 @@ label > span { font-size: 0.75rem !important; font-weight: 500 !important; color
     border-radius: 20px; padding: 0.1em 0.55em; font-size: 0.74rem !important;
     color: #8b949e !important; margin: 0 0.2rem 0.2rem 0; line-height: 1.5;
 }
+
+/* ── Export buttons ── */
+.export-row { margin-top: 1rem !important; }
+.export-btn > button {
+    background: #161b22 !important; border: 1px solid #30363d !important; border-radius: 8px !important;
+    color: #8b949e !important; font-size: 0.82rem !important; font-weight: 500 !important;
+    padding: 0.55rem 1.1rem !important; cursor: pointer !important;
+    transition: background 0.15s, border-color 0.15s, color 0.15s !important;
+}
+.export-btn > button:hover { background: #21262d !important; border-color: #388bfd !important; color: #c9d1d9 !important; }
+.export-btn > button:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
 """
 
 # ── Validação ──────────────────────────────────────────────────────────────────
@@ -183,30 +203,19 @@ def validate_top_k(value) -> tuple[int, str]:
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-def _extract_model_name(display_name: str) -> str:
-    """
-    Extrai o nome real do modelo e provider a partir do nome formatado.
-    Ex: "🔵 llama2 [ollama]" → ("llama2", "ollama")
-    Ex: "🟠 meta-llama/Meta-Llama-3-8B-Instruct [huggingface]" → ("meta-llama/Meta-Llama-3-8B-Instruct", "huggingface")
-    Ex: "🔴 gpt-4 [openai]" → ("gpt-4", "openai")
-    """
+def _extract_model_name(display_name: str) -> tuple[str | None, str | None]:
     if not display_name:
         return None, None
-    
-    # Remove o emoji no início (3-4 bytes dependendo do emoji)
     name = display_name
     for emoji in ["🔵", "🟠", "🔴"]:
         if name.startswith(emoji + " "):
             name = name[2:].lstrip()
             break
-    
-    # Extrai o provider entre colchetes [provider]
     provider = None
     if "[" in name and "]" in name:
         model_part, provider_part = name.rsplit("[", 1)
         provider = provider_part.rstrip("]").strip()
         name = model_part.strip()
-    
     return name, provider
 
 
@@ -271,10 +280,149 @@ def _format_doc(i: int, doc: dict, total: int) -> str:
     return "\n".join(lines)
 
 
+def _safe_latin(text: str) -> str:
+    return (text or "").encode("latin-1", "replace").decode("latin-1")
+
+
+# ── Exportação CSV ─────────────────────────────────────────────────────────────
+def export_csv(results: dict) -> tuple[str | None, str]:
+    """Retorna (caminho_do_csv | None, mensagem_de_erro)."""
+    if not results or not results.get("docs"):
+        return None, "Nenhum resultado disponível. Faça uma consulta primeiro."
+    try:
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, encoding="utf-8", newline=""
+        )
+        fieldnames = ["rank", "score", "title", "authors", "categories",
+                      "primary_category", "published", "arxiv_id", "url", "content"]
+        writer = csv.DictWriter(tmp, fieldnames=fieldnames)
+        writer.writeheader()
+        for i, doc in enumerate(results["docs"], 1):
+            writer.writerow({
+                "rank":             i,
+                "score":            f"{doc.get('score', 0):.4f}",
+                "title":            doc.get("title", ""),
+                "authors":          doc.get("authors", ""),
+                "categories":       doc.get("categories", ""),
+                "primary_category": doc.get("primary_category", ""),
+                "published":        (doc.get("published") or "")[:10],
+                "arxiv_id":         doc.get("arxiv_id", ""),
+                "url":              doc.get("url", ""),
+                "content":          doc.get("content", ""),
+            })
+        tmp.close()
+        return tmp.name, ""
+    except Exception as exc:
+        return None, f"Erro ao gerar CSV: {exc}"
+
+
+# ── Exportação PDF ─────────────────────────────────────────────────────────────
+def _cell(pdf: "FPDF", w: int, h: int, text: str) -> None:
+    """cell() com quebra de linha, compatível com fpdf2 >= 2.5."""
+    pdf.cell(w, h, text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+
+def export_pdf(results: dict) -> tuple[str | None, str]:
+    """Retorna (caminho_do_pdf | None, mensagem_de_erro)."""
+    if not HAS_FPDF:
+        return None, "fpdf2 não instalado — execute `make build` para reconstruir o container."
+    if not results or not results.get("docs"):
+        return None, "Nenhum resultado disponível. Faça uma consulta primeiro."
+
+    try:
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+
+        pdf.set_font("Helvetica", "B", 16)
+        _cell(pdf, 0, 10, "RAG Enterprise - Resultados da Consulta")
+        pdf.ln(3)
+
+        pdf.set_font("Helvetica", "B", 11)
+        _cell(pdf, 0, 8, "Consulta:")
+        pdf.set_font("Helvetica", "", 10)
+        pdf.multi_cell(0, 6, _safe_latin(results.get("query", "")))
+        pdf.ln(3)
+
+        pdf.set_font("Helvetica", "B", 11)
+        _cell(pdf, 0, 8, "Resposta:")
+        pdf.set_font("Helvetica", "", 10)
+        pdf.multi_cell(0, 6, _safe_latin(results.get("answer", "")))
+        pdf.ln(4)
+
+        pdf.set_font("Helvetica", "I", 9)
+        _cell(
+            pdf, 0, 6,
+            f"Provider: {results.get('provider', '')}  |  "
+            f"Modelo: {results.get('model', '')}  |  "
+            f"Latencia: {results.get('latency_ms', 0)} ms",
+        )
+        pdf.ln(5)
+
+        docs = results["docs"]
+        pdf.set_font("Helvetica", "B", 12)
+        _cell(pdf, 0, 8, f"Documentos Recuperados ({len(docs)})")
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(4)
+
+        for i, doc in enumerate(docs, 1):
+            title = f"[{i}] {doc.get('title', f'Documento {i}')}"
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.multi_cell(0, 6, _safe_latin(title))
+
+            pdf.set_font("Helvetica", "", 9)
+            score   = doc.get("score", 0)
+            authors = doc.get("authors", "") or ""
+            cats    = doc.get("categories", "") or ""
+            pub     = (doc.get("published") or "")[:10]
+            url     = doc.get("url", "") or ""
+
+            _cell(pdf, 0, 5, f"Score: {score:.3f}")
+            if authors:
+                pdf.multi_cell(0, 5, _safe_latin(f"Autores: {authors}"))
+            if cats:
+                pdf.multi_cell(0, 5, _safe_latin(f"Categorias: {cats}"))
+            if pub:
+                _cell(pdf, 0, 5, f"Publicado: {pub}")
+            if url:
+                pdf.set_text_color(30, 100, 200)
+                _cell(pdf, 0, 5, _safe_latin(url))
+                pdf.set_text_color(0, 0, 0)
+
+            pdf.ln(2)
+            content = doc.get("content", "") or ""
+            excerpt = content[:600] + ("..." if len(content) > 600 else "")
+            pdf.set_font("Helvetica", "I", 9)
+            pdf.multi_cell(0, 5, _safe_latin(excerpt))
+            pdf.ln(4)
+
+            if i < len(docs):
+                pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+                pdf.ln(3)
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+        tmp.close()
+        with open(tmp.name, "wb") as f:
+            f.write(pdf.output())
+        return tmp.name, ""
+
+    except Exception as exc:
+        return None, f"Erro ao gerar PDF: {exc}"
+
+
 # ── Query ──────────────────────────────────────────────────────────────────────
-def query_rag(question: str, top_k_raw, selected_model: str) -> tuple[str, str, str, object]:
-    """Retorna: (answer_md, run_meta_html, docs_md, accordion_state)."""
-    empty_meta = ""
+def query_rag(
+    question: str,
+    top_k_raw,
+    selected_model: str,
+    filter_category: str,
+    filter_author: str,
+    filter_date_from: str,
+    filter_date_to: str,
+) -> tuple:
+    """Retorna: (answer_md, run_meta_html, docs_md, accordion_state, results_state)."""
+    empty_meta  = ""
+    empty_state = {}
 
     if not question.strip():
         return (
@@ -282,40 +430,46 @@ def query_rag(question: str, top_k_raw, selected_model: str) -> tuple[str, str, 
             empty_meta,
             "",
             gr.Accordion(open=False),
+            empty_state,
         )
 
     top_k, _ = validate_top_k(top_k_raw)
-
-    # Extrai o nome real do modelo e provider a partir da exibição formatada
-    model_to_use, provider_to_use = _extract_model_name(selected_model) if selected_model else (HF_MODEL, LLM_PROVIDER)
-    
+    model_to_use, provider_to_use = (
+        _extract_model_name(selected_model) if selected_model else (HF_MODEL, LLM_PROVIDER)
+    )
     if not model_to_use:
         model_to_use = HF_MODEL
     if not provider_to_use:
         provider_to_use = LLM_PROVIDER
 
+    payload: dict = {
+        "query":        question,
+        "top_k":        top_k,
+        "llm_model":    model_to_use,
+        "llm_provider": provider_to_use,
+    }
+    if filter_category and filter_category.strip():
+        payload["filter_category"] = filter_category.strip()
+    if filter_author and filter_author.strip():
+        payload["filter_author"] = filter_author.strip()
+    if filter_date_from and filter_date_from.strip():
+        payload["filter_date_from"] = filter_date_from.strip()
+    if filter_date_to and filter_date_to.strip():
+        payload["filter_date_to"] = filter_date_to.strip()
+
     try:
         with httpx.Client(timeout=120.0) as client:
-            response = client.post(
-                f"{API_URL}/query/",
-                json={
-                    "query": question,
-                    "top_k": top_k,
-                    "llm_model": model_to_use,
-                    "llm_provider": provider_to_use,
-                },
-            )
+            response = client.post(f"{API_URL}/query/", json=payload)
             response.raise_for_status()
             data = response.json()
 
-        # ── Campos de QueryResponse ──
-        answer       = data.get("answer", "")
-        latency      = data.get("latency_ms", 0)
-        provider     = data.get("llm_provider", provider_to_use)
-        model        = data.get("llm_model", model_to_use)
-        docs         = data.get("retrieved_docs", [])
-        run_id = data.get("run_id", "")
-        n = len(docs)
+        answer   = data.get("answer", "")
+        latency  = data.get("latency_ms", 0)
+        provider = data.get("llm_provider", provider_to_use)
+        model    = data.get("llm_model", model_to_use)
+        docs     = data.get("retrieved_docs", [])
+        run_id   = data.get("run_id", "")
+        n        = len(docs)
 
         meta_parts = [
             f"<span><strong>Provider</strong> &nbsp;<code>{provider}</code></span>",
@@ -327,27 +481,37 @@ def query_rag(question: str, top_k_raw, selected_model: str) -> tuple[str, str, 
             meta_parts.append(f"<span><strong>Run ID</strong> &nbsp;<code>{run_id}</code></span>")
 
         run_meta_html = '<div class="run-meta">' + "".join(meta_parts) + "</div>"
-
         docs_md = "\n".join(_format_doc(i, doc, n) for i, doc in enumerate(docs, 1))
 
-        return answer, run_meta_html, docs_md, gr.Accordion(open=True)
+        results_state = {
+            "query":      question,
+            "answer":     answer,
+            "provider":   provider,
+            "model":      model,
+            "latency_ms": latency,
+            "run_id":     run_id,
+            "docs":       docs,
+        }
+
+        return answer, run_meta_html, docs_md, gr.Accordion(open=True), results_state
 
     except httpx.ConnectError:
         msg = "❌ Não foi possível conectar à API. Verifique se o backend está rodando."
-        return msg, empty_meta, "", gr.Accordion(open=False)
+        return msg, empty_meta, "", gr.Accordion(open=False), empty_state
     except httpx.HTTPStatusError as e:
         return (
             f"❌ Erro HTTP {e.response.status_code}: {e.response.text}",
             empty_meta,
             "",
             gr.Accordion(open=False),
+            empty_state,
         )
     except Exception as e:
-        return f"❌ Erro inesperado: {str(e)}", empty_meta, "", gr.Accordion(open=False)
+        return f"❌ Erro inesperado: {str(e)}", empty_meta, "", gr.Accordion(open=False), empty_state
 
 
 # ── Layout ─────────────────────────────────────────────────────────────────────
-with gr.Blocks(title="Buscador de Documentos Científicos") as demo:
+with gr.Blocks(title="Buscador de Documentos Científicos", css=CSS) as demo:
 
     gr.HTML("""
         <div class="rag-header">
@@ -355,6 +519,8 @@ with gr.Blocks(title="Buscador de Documentos Científicos") as demo:
             <p>Consulta semântica em artigos científicos</p>
         </div>
     """)
+
+    results_state = gr.State({})
 
     with gr.Row(equal_height=False):
 
@@ -366,13 +532,12 @@ with gr.Blocks(title="Buscador de Documentos Científicos") as demo:
                 max_lines=10,
             )
 
-            # ── Seletor de modelo ──────────────────────────────────────────────
             model_dropdown = gr.Dropdown(
                 label="Modelo de linguagem",
-                info="🔵 Modelos locais (Ollama) | 🟠 Modelos remostos (HuggingFace) | 🔴 Modelos OpenAI",
+                info="🔵 Modelos locais (Ollama) | 🟠 Modelos remotos (HuggingFace) | 🔴 Modelos OpenAI",
                 choices=AVAILABLE_MODELS,
                 value=DEFAULT_DISPLAY,
-                allow_custom_value=True,   # permite digitar um HF model ID customizado
+                allow_custom_value=True,
                 elem_classes=["model-selector-wrap"],
             )
 
@@ -383,6 +548,32 @@ with gr.Blocks(title="Buscador de Documentos Científicos") as demo:
                 elem_classes=["top-k-wrap"],
             )
             validation_msg = gr.Markdown(value="", elem_classes=["validation-error"])
+
+            # ── Filtros Avançados ──────────────────────────────────────────────
+            with gr.Accordion("Filtros Avançados", open=False):
+                filter_category = gr.Dropdown(
+                    label="Categoria arXiv",
+                    choices=ARXIV_CATEGORIES,
+                    value="",
+                    allow_custom_value=True,
+                    info="Ex: cs.LG, cs.CV — deixe em branco para todas",
+                )
+                filter_author = gr.Textbox(
+                    label="Autor",
+                    placeholder="Ex: Hinton, LeCun",
+                    max_lines=1,
+                )
+                with gr.Row():
+                    filter_date_from = gr.Textbox(
+                        label="Data inicial (YYYY-MM-DD)",
+                        placeholder="2023-01-01",
+                        max_lines=1,
+                    )
+                    filter_date_to = gr.Textbox(
+                        label="Data final (YYYY-MM-DD)",
+                        placeholder="2024-12-31",
+                        max_lines=1,
+                    )
 
             submit_btn = gr.Button("Consultar", variant="primary", elem_classes=["submit-btn"])
 
@@ -398,6 +589,17 @@ with gr.Blocks(title="Buscador de Documentos Científicos") as demo:
     with gr.Accordion("Documentos recuperados", open=False) as docs_accordion:
         docs_output = gr.Markdown(value="", elem_classes=["docs-content"])
 
+    # ── Exportação ────────────────────────────────────────────────────────────
+    with gr.Row(elem_classes=["export-row"]):
+        csv_btn = gr.Button("⬇ Exportar CSV", elem_classes=["export-btn"])
+        pdf_btn = gr.Button("⬇ Exportar PDF", elem_classes=["export-btn"])
+
+    export_status = gr.Markdown(value="", elem_classes=["validation-error"])
+
+    with gr.Row():
+        csv_file = gr.File(label="CSV", visible=False)
+        pdf_file = gr.File(label="PDF", visible=False)
+
     # ── Validação ao editar top-k ──────────────────────────────────────────────
     def on_top_k_blur(value):
         if value is None or str(value).strip() == "":
@@ -411,13 +613,32 @@ with gr.Blocks(title="Buscador de Documentos Científicos") as demo:
         outputs=[top_k_input, validation_msg],
     )
 
-    # ── Submit (botão e Enter) ─────────────────────────────────────────────────
+    # ── Submit ─────────────────────────────────────────────────────────────────
+    query_inputs  = [question_input, top_k_input, model_dropdown,
+                     filter_category, filter_author, filter_date_from, filter_date_to]
+    query_outputs = [answer_output, run_meta_output, docs_output,
+                     docs_accordion, results_state]
+
     for trigger in (submit_btn.click, question_input.submit):
-        trigger(
-            fn=query_rag,
-            inputs=[question_input, top_k_input, model_dropdown],  # model_dropdown adicionado
-            outputs=[answer_output, run_meta_output, docs_output, docs_accordion],
-        )
+        trigger(fn=query_rag, inputs=query_inputs, outputs=query_outputs)
+
+    # ── Exportação CSV ─────────────────────────────────────────────────────────
+    def on_export_csv(results):
+        path, err = export_csv(results)
+        if path:
+            return gr.File(value=path, visible=True), ""
+        return gr.File(visible=False), f"❌ {err}"
+
+    csv_btn.click(fn=on_export_csv, inputs=[results_state], outputs=[csv_file, export_status])
+
+    # ── Exportação PDF ─────────────────────────────────────────────────────────
+    def on_export_pdf(results):
+        path, err = export_pdf(results)
+        if path:
+            return gr.File(value=path, visible=True), ""
+        return gr.File(visible=False), f"❌ {err}"
+
+    pdf_btn.click(fn=on_export_pdf, inputs=[results_state], outputs=[pdf_file, export_status])
 
 
 if __name__ == "__main__":
@@ -425,5 +646,4 @@ if __name__ == "__main__":
         server_name="0.0.0.0",
         server_port=GRADIO_PORT,
         share=False,
-        css=CSS,
     )

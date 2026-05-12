@@ -16,6 +16,26 @@ from api.services.reranker_service import RerankerService
 from api.schemas.config import settings
 
 
+def _build_milvus_expr(
+    filter_category: str | None = None,
+    filter_author: str | None = None,
+    filter_date_from: str | None = None,
+    filter_date_to: str | None = None,
+) -> str | None:
+    parts = []
+    if filter_category and filter_category.strip():
+        cat = filter_category.strip().replace('"', "")
+        parts.append(f'metadata["categories"] like "%{cat}%"')
+    if filter_author and filter_author.strip():
+        author = filter_author.strip().replace('"', "")
+        parts.append(f'metadata["authors"] like "%{author}%"')
+    if filter_date_from and filter_date_from.strip():
+        parts.append(f'metadata["published"] >= "{filter_date_from.strip()}"')
+    if filter_date_to and filter_date_to.strip():
+        parts.append(f'metadata["published"] <= "{filter_date_to.strip()}"')
+    return " and ".join(parts) if parts else None
+
+
 def _detect_provider(model: str) -> str:
     if not model:
         return "huggingface"
@@ -66,6 +86,10 @@ class RAGService:
         top_k: int = 5,
         llm_model: str = None,
         llm_provider: str = None,
+        filter_category: str | None = None,
+        filter_author: str | None = None,
+        filter_date_from: str | None = None,
+        filter_date_to: str | None = None,
     ) -> QueryResponse:
         if llm_provider and llm_provider.lower() in ("ollama", "huggingface", "openai"):
             provider = llm_provider.lower()
@@ -82,14 +106,18 @@ class RAGService:
             else:
                 llm_model = settings.HF_LLM_MODEL
 
-        if provider == "openai":
-            return await self._query_with_openai(query=query, top_k=top_k, llm_model=llm_model)
-        elif provider == "ollama":
-            return await self._query_with_ollama(query=query, top_k=top_k, llm_model=llm_model)
-        else:
-            return await self._query_with_huggingface(query=query, top_k=top_k, llm_model=llm_model)
+        expr = _build_milvus_expr(filter_category, filter_author, filter_date_from, filter_date_to)
+        if expr:
+            logger.info(f"Filtro Milvus aplicado: {expr}")
 
-    async def _query_with_openai(self, query: str, top_k: int, llm_model: str) -> QueryResponse:
+        if provider == "openai":
+            return await self._query_with_openai(query=query, top_k=top_k, llm_model=llm_model, expr=expr)
+        elif provider == "ollama":
+            return await self._query_with_ollama(query=query, top_k=top_k, llm_model=llm_model, expr=expr)
+        else:
+            return await self._query_with_huggingface(query=query, top_k=top_k, llm_model=llm_model, expr=expr)
+
+    async def _query_with_openai(self, query: str, top_k: int, llm_model: str, expr: str | None = None) -> QueryResponse:
         run_id = str(uuid.uuid4())
         start = time.time()
 
@@ -101,6 +129,7 @@ class RAGService:
             vector=query_vector,
             top_k=top_k,
             collection_name=settings.MILVUS_COLLECTION,
+            expr=expr,
         )
 
         retrieved_docs = [
@@ -152,7 +181,7 @@ class RAGService:
             latency_ms=latency_ms,
         )
 
-    async def _query_with_huggingface(self, query: str, top_k: int, llm_model: str) -> QueryResponse:
+    async def _query_with_huggingface(self, query: str, top_k: int, llm_model: str, expr: str | None = None) -> QueryResponse:
         run_id = str(uuid.uuid4())
         start = time.time()
 
@@ -164,6 +193,7 @@ class RAGService:
             vector=query_vector,
             top_k=top_k,
             collection_name=settings.MILVUS_COLLECTION,
+            expr=expr,
         )
 
         retrieved_docs = [
@@ -218,7 +248,7 @@ class RAGService:
             latency_ms=latency_ms,
         )
 
-    async def _query_with_ollama(self, query: str, top_k: int, llm_model: str) -> QueryResponse:
+    async def _query_with_ollama(self, query: str, top_k: int, llm_model: str, expr: str | None = None) -> QueryResponse:
         from ollama import Client
         client = Client(host=settings.OLLAMA_HOST, timeout=120.0)
 
@@ -238,6 +268,7 @@ class RAGService:
             vector=query_vector,
             top_k=top_k,
             collection_name=settings.MILVUS_COLLECTION,
+            expr=expr,
         )
 
         retrieved_docs = [
